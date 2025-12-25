@@ -62,33 +62,38 @@ class Op:
             img_val = self.inputs[0]
             if img_val.kind == ValueKind.ARGUMENT and img_val.resource_index is not None:
                 return [img_val.resource_index]
-            # Indirect access or non-argument-based resource (e.g. from array)?
-            # MVP: Assume direct resource linking.
         elif self.opcode == OpCode.BUFFER_WRITE:
              buf_val = self.inputs[0]
              if buf_val.kind == ValueKind.ARGUMENT and buf_val.resource_index is not None:
                 return [buf_val.resource_index]
+        elif self.opcode == OpCode.BLUR:
+            # BLUR writes to output resource stored in op.metadata or outputs
+            if self.outputs and self.outputs[0].resource_index is not None:
+                return [self.outputs[0].resource_index]
         return []
 
     def reads_resources(self) -> List[int]:
         """Returns list of resource indices read by this op."""
         indices = []
-        indices = []
         if self.opcode in {OpCode.IMAGE_LOAD, OpCode.SAMPLE, OpCode.IMAGE_SIZE}:
             img_val = self.inputs[0]
-            if img_val.kind == ValueKind.ARGUMENT and img_val.resource_index is not None:
+            # Check both ARGUMENT and SSA values with resource_index
+            if img_val.resource_index is not None:
                 indices.append(img_val.resource_index)
         elif self.opcode == OpCode.BUFFER_READ:
              buf_val = self.inputs[0]
-             if buf_val.kind == ValueKind.ARGUMENT and buf_val.resource_index is not None:
+             if buf_val.resource_index is not None:
                 indices.append(buf_val.resource_index)
         elif self.opcode == OpCode.IMAGE_STORE:
             # Check if we are storing FROM a resource (copy)
-            # imageStore(img, coord, data) -> inputs[2] is data
             if len(self.inputs) > 2:
                 data_val = self.inputs[2]
-                if data_val.kind == ValueKind.ARGUMENT and data_val.resource_index is not None:
+                if data_val.resource_index is not None:
                      indices.append(data_val.resource_index)
+        elif self.opcode == OpCode.BLUR:
+            # BLUR reads from input resource
+            if self.inputs and self.inputs[0].resource_index is not None:
+                indices.append(self.inputs[0].resource_index)
         return indices
 
 

@@ -7,9 +7,11 @@ from .handlers.textures import handle_noise_texture, handle_white_noise, handle_
 from .handlers.control_flow import handle_position, handle_switch, handle_mix, handle_repeat_output, handle_repeat_input
 from .handlers.converter import handle_separate_xyz, handle_combine_xyz, handle_separate_color, handle_combine_color, handle_map_range, handle_clamp
 from .handlers.output import handle_output_image
+from .handlers.output_sequence import handle_output_sequence
 from .handlers.resize import handle_resize
 from .handlers.rasterize import handle_capture
 from .handlers.distort import handle_distort
+from .handlers.blur import handle_blur
 
 # Registry mapping node bl_idname to handler function
 HANDLER_REGISTRY = {
@@ -21,6 +23,7 @@ HANDLER_REGISTRY = {
     
     # Output
     'ComputeNodeOutputImage': handle_output_image,
+    'ComputeNodeOutputSequence': handle_output_sequence,
     
     # Math
     'ComputeNodeMath': handle_math,
@@ -50,6 +53,7 @@ HANDLER_REGISTRY = {
     'ComputeNodeResize': handle_resize,
     'ComputeNodeCapture': handle_capture,
     'ComputeNodeDistort': handle_distort,
+    'ComputeNodeBlur': handle_blur,
 }
 
 def get_handler(bl_idname):

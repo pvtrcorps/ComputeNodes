@@ -16,8 +16,8 @@ def handle_capture(node, ctx):
     into concrete data that can be sampled at arbitrary coordinates.
     
     Grid Architecture:
-    - Grid2D: width x height, depth=1 (current)
-    - Grid3D: width x height x depth (future)
+    - Grid2D: width x height (dimensions == '2D')
+    - Grid3D: width x height x depth (dimensions == '3D')
     """
     builder = ctx['builder']
     get_socket_value = ctx['get_socket_value']
@@ -31,9 +31,20 @@ def handle_capture(node, ctx):
         # Default to black if nothing connected
         val_input = builder.constant((0.0, 0.0, 0.0, 1.0), DataType.VEC4)
     
+    # Determine dimensions from node property
+    is_3d = getattr(node, 'dimensions', '2D') == '3D'
+    dims = 3 if is_3d else 2
+    
     # Get target resolution
     target_width = node.width
     target_height = node.height
+    target_depth = getattr(node, 'depth', 1) if is_3d else 1
+    
+    # Create size tuple based on dimensions
+    if is_3d:
+        size = (target_width, target_height, target_depth)
+    else:
+        size = (target_width, target_height)
     
     # Create output Grid (ImageDesc)
     output_name = f"grid_{node.name}"
@@ -41,8 +52,8 @@ def handle_capture(node, ctx):
         name=output_name,
         access=ResourceAccess.READ_WRITE,
         format="rgba32f",
-        size=(target_width, target_height),
-        dimensions=2
+        size=size,
+        dimensions=dims
     )
     val_output = builder.add_resource(desc)
     
@@ -55,14 +66,20 @@ def handle_capture(node, ctx):
         # Input is already a Grid - sample it at current position
         # This allows chaining: Grid -> Capture (resize equivalent)
         val_gid = builder.builtin("gl_GlobalInvocationID", DataType.UVEC3)
-        val_coord = builder.swizzle(val_gid, "xy")
-        val_coord_ivec = builder.cast(val_coord, DataType.IVEC2)
+        if is_3d:
+            val_coord_ivec = builder.cast(val_gid, DataType.IVEC3)
+        else:
+            val_coord = builder.swizzle(val_gid, "xy")
+            val_coord_ivec = builder.cast(val_coord, DataType.IVEC2)
         val_input = builder.image_load(val_input, val_coord_ivec)
     
-    # Compute output coordinates
+    # Compute output coordinates based on dimensions
     val_gid = builder.builtin("gl_GlobalInvocationID", DataType.UVEC3)
-    val_coord = builder.swizzle(val_gid, "xy")
-    val_coord_ivec = builder.cast(val_coord, DataType.IVEC2)
+    if is_3d:
+        val_coord_ivec = builder.cast(val_gid, DataType.IVEC3)
+    else:
+        val_coord = builder.swizzle(val_gid, "xy")
+        val_coord_ivec = builder.cast(val_coord, DataType.IVEC2)
     
     # Write to Grid
     builder.image_store(val_output, val_coord_ivec, val_input)
@@ -72,4 +89,5 @@ def handle_capture(node, ctx):
     socket_value_map[out_key] = val_output
     
     return val_output
+
 

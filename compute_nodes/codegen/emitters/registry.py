@@ -14,6 +14,7 @@ from .images import emit_image_store, emit_image_load, emit_image_size, emit_sam
 from .textures import emit_noise, emit_white_noise, emit_voronoi
 from .control_flow import emit_loop_start, emit_loop_end
 from .converter import emit_separate_xyz, emit_combine_xy, emit_combine_xyz, emit_separate_color, emit_combine_color, emit_map_range, emit_clamp_range
+from .blur import emit_blur
 
 
 # Registry mapping OpCode to emitter function
@@ -118,6 +119,9 @@ EMITTER_REGISTRY = {
     OpCode.COMBINE_COLOR: emit_combine_color,
     OpCode.MAP_RANGE: emit_map_range,
     OpCode.CLAMP_RANGE: emit_clamp_range,
+    
+    # Image Processing
+    OpCode.BLUR: emit_blur,
 }
 
 

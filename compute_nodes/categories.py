@@ -44,9 +44,11 @@ node_categories = [
         NodeItem("ComputeNodeCapture"),
         NodeItem("ComputeNodeResize"),
         NodeItem("ComputeNodeDistort"),
+        NodeItem("ComputeNodeBlur"),
     ]),
     ComputeNodeCategory("COMPUTE_OUTPUT", "Output", items=[
         NodeItem("ComputeNodeOutputImage"),
+        NodeItem("ComputeNodeOutputSequence"),
     ]),
 ]
 

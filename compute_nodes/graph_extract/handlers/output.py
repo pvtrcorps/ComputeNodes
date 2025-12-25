@@ -15,14 +15,11 @@ def handle_output_image(node, ctx):
     Grid Architecture:
     - Input MUST be a GRID (HANDLE type)
     - Resolution is INHERITED from the input grid
-    - If input is a Field (Color/Float/Vector), raise an error
     
-    The handler copies the input grid to the output Image datablock.
-    The actual GPU→CPU readback happens in the executor.
-    
-    Future output nodes:
-    - handle_output_volume: Grid3D → OpenVDB
-    - handle_output_sequence: Grid2D[] → Image sequence
+    Save Modes:
+    - DATABLOCK: Keep in Blender memory
+    - SAVE: Write to file after execution
+    - PACK: Pack into .blend file
     """
     builder = ctx['builder']
     socket_value_map = ctx['socket_value_map']
@@ -35,6 +32,9 @@ def handle_output_image(node, ctx):
     # Get properties from node
     output_name = node.output_name
     output_format = node.format
+    save_mode = getattr(node, 'save_mode', 'DATABLOCK')
+    filepath = getattr(node, 'filepath', '')
+    file_format = getattr(node, 'file_format', 'OPEN_EXR')
     
     # Get input data
     data_socket = node.inputs[0]  # "Grid" socket
@@ -46,14 +46,13 @@ def handle_output_image(node, ctx):
     
     # VALIDATE: Input must be a GRID (HANDLE)
     if val_data.type != DataType.HANDLE:
-        # This is a Field (Color/Float/Vector) - not a Grid!
         raise TypeError(
             f"Output Image '{node.name}' requires a Grid input.\n"
             f"Got: {val_data.type.name} (Field)\n"
-            f"Solution: Insert a Capture node before Output Image to materialize the field."
+            f"Solution: Insert a Capture node before Output Image."
         )
     
-    # Find the source resource to get its dimensions
+    # Find the source resource to get dimensions
     source_resource = None
     if val_data.resource_index is not None:
         source_resource = builder.graph.resources[val_data.resource_index]
@@ -67,27 +66,36 @@ def handle_output_image(node, ctx):
         output_width = 512
         output_height = 512
     
-    # Create ImageDesc for the output (writes to Blender Image)
-    # is_internal=False means this needs a Blender Image datablock
+    # Create ImageDesc for the output
     desc = ImageDesc(
         name=output_name,
         access=ResourceAccess.WRITE,
         format=output_format,
         size=(output_width, output_height),
         dimensions=2,
-        is_internal=False  # This is an OUTPUT - needs Blender Image
+        is_internal=False
     )
     val_target = builder.add_resource(desc)
     
-    # Sample input texture at normalized UVs
-    # Use placeholder UV - emit_sample will generate inline UVs
+    # Store save settings for executor to use
+    if not hasattr(builder.graph, 'output_image_settings'):
+        builder.graph.output_image_settings = {}
+    
+    builder.graph.output_image_settings[output_name] = {
+        'save_mode': save_mode,
+        'filepath': filepath,
+        'file_format': file_format,
+    }
+    
+    # Sample input texture
     val_placeholder_uv = builder.constant((0.5, 0.5), DataType.VEC2)
     val_sampled = builder.sample(val_data, val_placeholder_uv)
     
-    # Write to output using gl_GlobalInvocationID
+    # Write to output
     val_gid = builder.builtin("gl_GlobalInvocationID", DataType.UVEC3)
     val_gid_xy = builder.swizzle(val_gid, "xy")
     val_coord = builder.cast(val_gid_xy, DataType.IVEC2)
     builder.image_store(val_target, val_coord, val_sampled)
     
     return val_target
+

@@ -100,6 +100,7 @@ class OpCode(Enum):
     IMAGE_LOAD = auto()   # imageLoad(img, coord)
     IMAGE_STORE = auto()  # imageStore(img, coord, val)
     IMAGE_SIZE = auto()   # imageSize(img)
+    BLUR = auto()         # Gaussian blur kernel
     BUFFER_READ = auto()
     BUFFER_WRITE = auto()
     

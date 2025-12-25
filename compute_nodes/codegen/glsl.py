@@ -30,8 +30,8 @@ class ShaderGenerator:
 
     def _generate_header(self) -> str:
         lines = [
-            # "#version 430", # Blender adds this automatically
-            "layout(local_size_x = 16, local_size_y = 16) in;", # Standard 2D Block
+            # NOTE: layout(local_size_x/y/z) is NOT included here
+            # Blender's GPUShaderCreateInfo.local_group_size() handles this
             "",
             # Inject Libraries
             HASH_GLSL,
@@ -116,6 +116,10 @@ class ShaderGenerator:
             self._emitted_ids = set()
         
         if val.kind == ValueKind.SSA:
+            # Check if this SSA value has a resource_index (e.g., from Blur output)
+            # If so, use the resource binding name instead of SSA variable
+            if val.resource_index is not None:
+                return f"img_{val.resource_index}"  # Use same name as shader binding
             return f"v{val.id}"
         elif val.kind == ValueKind.CONSTANT:
             # If constant already emitted, use its variable

@@ -74,7 +74,7 @@ class TextureManager:
                 if existing.width == size[0]:
                     return existing
             elif dims == 3:
-                # Note: GPUTexture might not expose depth, so recreate if needed
+                # GPUTexture may not expose depth, compare what we can
                 if existing.width == size[0] and existing.height == size[1]:
                     return existing
             else:
@@ -82,7 +82,17 @@ class TextureManager:
                     return existing
         
         try:
-            texture = gpu.types.GPUTexture(size, format=fmt)
+            # For 3D textures, Blender requires initial data
+            if dims == 3:
+                import numpy as np
+                total_elements = size[0] * size[1] * size[2] * 4  # RGBA
+                data = np.zeros(total_elements, dtype=np.float32)
+                buffer = gpu.types.Buffer('FLOAT', total_elements, data.tolist())
+                texture = gpu.types.GPUTexture(size, layers=0, is_cubemap=False, 
+                                                format=fmt, data=buffer)
+            else:
+                texture = gpu.types.GPUTexture(size, format=fmt)
+            
             self._internal_textures[name] = texture
             logger.debug(f"Created {dims}D texture '{name}': {size}, format={fmt}")
             return texture

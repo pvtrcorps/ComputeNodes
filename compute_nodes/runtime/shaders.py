@@ -110,19 +110,32 @@ class ShaderManager:
                             
                         qualifiers = {'READ', 'WRITE'}
                         shader_info.image(i, fmt, image_type, uniform_name, qualifiers=qualifiers)
-
-            shader_info.compute_source(source)
             
-            # Add dispatch_size push constant for Position normalization
-            # This replaces gl_NumWorkGroups * gl_WorkGroupSize with actual dispatch size
+            # Detect if any USED resource is 3D to choose appropriate workgroup size
+            has_3d = False
+            if resources:
+                used_indices = reads_set | writes_set
+                for idx in used_indices:
+                    if idx < len(resources):
+                        res = resources[idx]
+                        if isinstance(res, ImageDesc) and getattr(res, 'dimensions', 2) == 3:
+                            has_3d = True
+                            break
+            
+            # Push constants for Position normalization
             shader_info.push_constant('INT', 'u_dispatch_width')
             shader_info.push_constant('INT', 'u_dispatch_height')
+            shader_info.push_constant('INT', 'u_dispatch_depth')
             
-            # Dynamic local group size based on dispatch dimensions
-            # For now, use sensible defaults per dimension type
-            # 1D: 256x1x1, 2D: 16x16x1, 3D: 8x8x8
-            # TODO: Could be passed in or derived from graph analysis
-            shader_info.local_group_size(16, 16, 1)
+            # Dynamic local group size based on dimension type
+            # 2D: 16x16x1 (256 threads), 3D: 8x8x8 (512 threads)
+            if has_3d:
+                shader_info.local_group_size(8, 8, 8)
+            else:
+                shader_info.local_group_size(16, 16, 1)
+            
+            # Add compute source AFTER push constants and local_group_size
+            shader_info.compute_source(source)
             
             shader = gpu.shader.create_from_info(shader_info)
             self._shader_cache[key] = shader
