@@ -10,10 +10,10 @@ from .math_funcs import emit_rounding, emit_minmax, emit_smooth, emit_compare
 from .vector import emit_dot, emit_cross, emit_length, emit_distance
 from .vector import emit_normalize, emit_reflect, emit_refract, emit_faceforward, emit_project
 from .types import emit_constant, emit_builtin, emit_swizzle, emit_cast, emit_select
-from .images import emit_image_store, emit_image_load, emit_image_size
+from .images import emit_image_store, emit_image_load, emit_image_size, emit_sample
 from .textures import emit_noise, emit_white_noise, emit_voronoi
 from .control_flow import emit_loop_start, emit_loop_end
-from .converter import emit_separate_xyz, emit_combine_xyz, emit_separate_color, emit_combine_color, emit_map_range, emit_clamp_range
+from .converter import emit_separate_xyz, emit_combine_xy, emit_combine_xyz, emit_separate_color, emit_combine_color, emit_map_range, emit_clamp_range
 
 
 # Registry mapping OpCode to emitter function
@@ -99,6 +99,7 @@ EMITTER_REGISTRY = {
     OpCode.IMAGE_STORE: emit_image_store,
     OpCode.IMAGE_LOAD: emit_image_load,
     OpCode.IMAGE_SIZE: emit_image_size,
+    OpCode.SAMPLE: emit_sample,
     
     # Textures
     OpCode.NOISE: emit_noise,
@@ -111,6 +112,7 @@ EMITTER_REGISTRY = {
     
     # Converter
     OpCode.SEPARATE_XYZ: emit_separate_xyz,
+    OpCode.COMBINE_XY: emit_combine_xy,
     OpCode.COMBINE_XYZ: emit_combine_xyz,
     OpCode.SEPARATE_COLOR: emit_separate_color,
     OpCode.COMBINE_COLOR: emit_combine_color,

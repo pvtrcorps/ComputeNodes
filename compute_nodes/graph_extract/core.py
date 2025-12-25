@@ -33,14 +33,14 @@ def extract_graph(nodetree) -> Graph:
     # Recursion stack for cycle detection
     recursion_stack: Set[int] = set()
     
-    # Find Output Nodes
+    # Find Output Nodes (Output Image)
     output_nodes = []
     for node in nodetree.nodes:
-        if node.bl_idname == 'ComputeNodeOutput':
+        if node.bl_idname == 'ComputeNodeOutputImage':
             output_nodes.append(node)
             
     if not output_nodes:
-        logger.warning("No Output Node found")
+        logger.warning("No Output Image Node found")
         return graph
 
     def get_socket_key(socket):

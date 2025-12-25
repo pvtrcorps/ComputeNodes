@@ -40,6 +40,58 @@ El sistema es **agnóstico de dominio**. No está diseñado específicamente par
 
 ---
 
+## 2.5 Paradigma Field-Based (Nuevo - Diciembre 2025)
+
+> **ARQUITECTURA FUNDAMENTAL** inspirada en Geometry Nodes Fields.
+
+### Conceptos Clave
+
+| Concepto | Geometry Nodes | Compute Nodes |
+|----------|----------------|---------------|
+| Contexto (define dominio) | Geometry | **Texture** (resolución, dimensiones) |
+| Funciones lazy | Fields (Position, Normal...) | **Fields** (Position, Noise, Math...) |
+| Materialización | Realize Instances | **Rasterize** (evalúa fields en contexto texture) |
+
+### Reglas de Diseño
+
+1. **Fields** son funciones lazy que NO conocen su contexto de evaluación
+   - `Position`, `Noise`, `Math`, `VectorMath`, etc.
+   - Sockets: `NodeSocketColor` (amarillo), `NodeSocketFloat`, `NodeSocketVector`
+
+2. **Textures** son datos concretos en GPU con resolución definida
+   - Tienen width×height (o depth para 3D)
+   - Socket: `ComputeSocketTexture` (cyan)
+
+3. **Rasterize** es el ÚNICO nodo que convierte Field→Texture
+   - Define el dominio (resolución)
+   - Los fields conectados se evalúan en ESE contexto
+
+4. **Output** NO tiene resolución - solo recibe Texture y escribe a Image datablock
+
+5. **Resize** opera Texture→Texture (reescala con bilinear)
+
+6. **Sample** convierte Texture→Field (lee de textura, retorna a field-space)
+
+### Flujo Típico
+
+```
+Position ──► Noise ──► Rasterize(512×512) ──► Output
+  (field)    (field)      (define domain)     (escribe)
+                              ↓
+                         [Texture 512×512]
+```
+
+### Conversiones
+
+```
+Field → Texture : SOLO via Rasterize
+Texture → Field : SOLO via Sample
+Texture → Texture : Resize
+Field → Output : ERROR (requiere Rasterize primero)
+```
+
+
+
 ## 3. Arquitectura Implementada
 
 ```
@@ -141,7 +193,38 @@ Actualmente, la entrada principal son **Imágenes de Blender** existentes y **Va
 
 Para alinear la implementación con la visión original y desbloquear el potencial completo:
 
-1.  **Implementar Node Resize**: Habilitar texturas intermedias de distinta resolución.
+1.  **Implementar Node Resize**: Habilitar texturas intermedias de distinta resolución. ✅ DONE
 2.  **Sistema de Bridges**: Implementar rasterización básica de atributos de malla (UV Space).
 3.  **Soporte 1D**: Habilitar buffers para cómputo general no-imagen (partículas, datos).
 4.  **UX**: Mejorar visualización de errores de compilación en el editor.
+
+---
+
+## 8. Grid Architecture Update (Diciembre 2025)
+
+> **RENAMING IMPORTANTE** para evitar colisiones con terminología de Blender.
+
+### Cambios de Naming
+
+| Antes | Ahora | Razón |
+|-------|-------|-------|
+| `ComputeSocketTexture` | `ComputeSocketGrid` | Evita colisión con Blender Texture datablocks |
+| `ComputeNodeRasterize` | `ComputeNodeCapture` | Más descriptivo (GN: "Capture Attribute") |
+| `ComputeNodeOutput` | `ComputeNodeOutputImage` | Específico para Grid2D→Image |
+
+### Grid Architecture
+
+Todos los Grids son internamente 3D:
+- **Grid2D** = Grid(W, H, 1) donde depth=1
+- **Grid3D** = Grid(W, H, D) donde todos >1
+- **Grid1D** = Grid(W, 1, 1) donde height=1, depth=1 (futuro)
+
+### Future Output Nodes
+
+| Nodo | Entrada | Salida | Formato |
+|------|---------|--------|---------|
+| **Output Image** | Grid2D | bpy.data.images | PNG/EXR/HDR |
+| **Output Volume** | Grid3D | OpenVDB | .vdb |
+| **Output Sequence** | Grid2D[] | Image sequence | Frame $F.png |
+| **Output Attribute** | Grid* | Mesh attribute | Named attribute |
+

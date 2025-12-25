@@ -1,18 +1,21 @@
 from .math import ComputeNodeMath
 from .input import ComputeNodeImageInput, ComputeNodeImageInfo, ComputeNodeImageWrite
-from .output import ComputeNodeOutput
+from .output import ComputeNodeOutputImage
 from .accessors import ComputeNodePosition, ComputeNodeSample
 from .vector import ComputeNodeVectorMath
 from .control_flow import ComputeNodeSwitch, ComputeNodeMix, ComputeNodeRepeatInput, ComputeNodeRepeatOutput
 from .textures import ComputeNodeNoiseTexture, ComputeNodeWhiteNoise, ComputeNodeVoronoiTexture
 from .converter import ComputeNodeSeparateXYZ, ComputeNodeCombineXYZ, ComputeNodeSeparateColor, ComputeNodeCombineColor, ComputeNodeMapRange, ComputeNodeClamp
+from .resize import ComputeNodeResize
+from .rasterize import ComputeNodeCapture
+from .distort import ComputeNodeDistort
 
 node_classes = [
     ComputeNodeMath,
     ComputeNodeImageInput,
     ComputeNodeImageInfo,
     ComputeNodeImageWrite,
-    ComputeNodeOutput,
+    ComputeNodeOutputImage,
     ComputeNodePosition,
     ComputeNodeSample,
     ComputeNodeVectorMath,
@@ -29,6 +32,9 @@ node_classes = [
     ComputeNodeCombineColor,
     ComputeNodeMapRange,
     ComputeNodeClamp,
+    ComputeNodeResize,
+    ComputeNodeCapture,
+    ComputeNodeDistort,
 ]
 
 def register():

@@ -34,11 +34,15 @@ class ImageDesc(ResourceDesc):
       - 1D: (width,)
       - 2D: (width, height)  
       - 3D: (width, height, depth)
+    
+    is_internal: If True, this is a GPU-only texture (Rasterize, Resize).
+                 If False, this needs a Blender Image datablock (Output).
     """
     format: str = "rgba32f"
     size: tuple = (0, 0)  # Variable length based on dimensions
     access: ResourceAccess = ResourceAccess.READ_WRITE
     dimensions: int = 2   # 1, 2, or 3
+    is_internal: bool = True  # GPU-only by default
     
     def __post_init__(self):
         # Set appropriate resource type based on dimensions

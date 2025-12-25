@@ -66,26 +66,47 @@ def handle_image_info(node, ctx):
 
 
 def handle_sample(node, ctx):
-    """Handle ComputeNodeSample node."""
+    """
+    Handle ComputeNodeSample node.
+    
+    Uses texture() for bilinear-filtered sampling with normalized UV coords (0-1).
+    """
     builder = ctx['builder']
     socket_value_map = ctx['socket_value_map']
     get_socket_key = ctx['get_socket_key']
     get_socket_value = ctx['get_socket_value']
     
-    val_img = get_socket_value(node.inputs[0])
-    val_coord = get_socket_value(node.inputs[1])
+    val_img = get_socket_value(node.inputs[0])  # Texture
+    val_coord = get_socket_value(node.inputs[1])  # Coordinate
     
     if val_img is None:
         val_out = builder.constant((0.0, 0.0, 0.0, 0.0), DataType.VEC4)
     else:
         if val_coord is None:
-            val_coord = builder.constant((0, 0), DataType.IVEC2)
+            val_coord = builder.constant((0.5, 0.5), DataType.VEC2)
         
-        if val_coord.type != DataType.IVEC2:
-            val_coord = builder.cast(val_coord, DataType.IVEC2)
+        # HANDLE is an image resource - cannot be used as coordinate!
+        if val_coord.type == DataType.HANDLE:
+            import logging
+            logging.getLogger(__name__).error(
+                f"Sample node '{node.name}': Coordinate input received a Texture (HANDLE), "
+                "expected a vector. Check your connections."
+            )
+            val_coord = builder.constant((0.5, 0.5), DataType.VEC2)
         
-        val_out = builder.image_load(val_img, val_coord)
+        # Ensure VEC2 for normalized UV sampling
+        if val_coord.type == DataType.VEC3:
+            val_coord = builder.swizzle(val_coord, "xy")
+        elif val_coord.type == DataType.IVEC2:
+            # Convert pixel coords to normalized - but prefer VEC2 input
+            val_coord = builder.cast(val_coord, DataType.VEC2)
+        elif val_coord.type != DataType.VEC2:
+            val_coord = builder.cast(val_coord, DataType.VEC2)
+        
+        # Use sample() for texture() - enables bilinear filtering
+        val_out = builder.sample(val_img, val_coord)
     
     out_key = get_socket_key(node.outputs[0])
     socket_value_map[out_key] = val_out
     return val_out
+

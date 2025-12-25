@@ -21,23 +21,31 @@ class ShaderManager:
         # Cache: hash(key) -> GPUShader
         self._shader_cache = {}
 
-    def get_shader(self, source: str, resources=None) -> gpu.types.GPUShader:
+    def get_shader(self, source: str, resources=None, reads_idx=None, writes_idx=None):
         """
-        Get or compile a compute shader.
+        Compile or return a cached compute shader.
         
         Args:
-            source (str): The full GLSL source code.
+            source (str): GLSL compute shader source code.
             resources (List[ResourceDesc]): List of resources to define interface.
+            reads_idx (set): Resource indices that are READ in this pass (use sampler)
+            writes_idx (set): Resource indices that are WRITTEN in this pass (use image)
             
         Returns:
             gpu.types.GPUShader: The compiled shader.
         """
         # Create a robust cache key
         res_sig = ""
+        reads_set = reads_idx or set()
+        writes_set = writes_idx or set()
+        
         if resources:
             for i, res in enumerate(resources):
                 fmt_sig = getattr(res, 'format', 'NONE')
-                res_sig += f"{i}:{res.name}:{res.access.name}:{fmt_sig};"
+                # Include pass-specific access in cache key
+                pass_access = "R" if i in reads_set else ""
+                pass_access += "W" if i in writes_set else ""
+                res_sig += f"{i}:{res.name}:{pass_access}:{fmt_sig};"
         
         key = hashlib.sha256((source + res_sig).encode('utf-8')).hexdigest()
         
@@ -51,16 +59,42 @@ class ShaderManager:
             
             # Define Interface from Resources
             if resources:
-                from ..ir.resources import ImageDesc
+                from ..ir.resources import ImageDesc, ResourceType
+                
+                # Only bind resources used in this pass
+                used_indices = reads_set | writes_set
+                
                 for i, res in enumerate(resources):
+                    if i not in used_indices:
+                        continue
+                        
                     uniform_name = f"img_{i}"
-                    access_name = res.access.name
                     
-                    if access_name == 'READ':
-                        # Use Sampler for Read-Only inputs
-                        shader_info.sampler(i, "FLOAT_2D", uniform_name)
+                    # Determine image type based on dimensions
+                    if isinstance(res, ImageDesc):
+                        dims = getattr(res, 'dimensions', 2)
+                        if dims == 1:
+                            sampler_type = "FLOAT_1D"
+                            image_type = "FLOAT_1D"
+                        elif dims == 3:
+                            sampler_type = "FLOAT_3D"
+                            image_type = "FLOAT_3D"
+                        else:
+                            sampler_type = "FLOAT_2D"
+                            image_type = "FLOAT_2D"
                     else:
-                        # Write or Read-Write requires Image Load/Store
+                        sampler_type = "FLOAT_2D"
+                        image_type = "FLOAT_2D"
+                    
+                    # Determine binding based on PASS-SPECIFIC access
+                    is_read = i in reads_set
+                    is_write = i in writes_set
+                    
+                    if is_read and not is_write:
+                        # Read-only in this pass: use sampler for texture()
+                        shader_info.sampler(i, sampler_type, uniform_name)
+                    else:
+                        # Write or read-write: use image for imageStore/imageLoad
                         if hasattr(res, 'format') and res.format:
                             raw_fmt = res.format.upper()
                             # Map incompatible Blender formats
@@ -75,9 +109,19 @@ class ShaderManager:
                             fmt = 'RGBA32F'
                             
                         qualifiers = {'READ', 'WRITE'}
-                        shader_info.image(i, fmt, "FLOAT_2D", uniform_name, qualifiers=qualifiers)
+                        shader_info.image(i, fmt, image_type, uniform_name, qualifiers=qualifiers)
 
             shader_info.compute_source(source)
+            
+            # Add dispatch_size push constant for Position normalization
+            # This replaces gl_NumWorkGroups * gl_WorkGroupSize with actual dispatch size
+            shader_info.push_constant('INT', 'u_dispatch_width')
+            shader_info.push_constant('INT', 'u_dispatch_height')
+            
+            # Dynamic local group size based on dispatch dimensions
+            # For now, use sensible defaults per dimension type
+            # 1D: 256x1x1, 2D: 16x16x1, 3D: 8x8x8
+            # TODO: Could be passed in or derived from graph analysis
             shader_info.local_group_size(16, 16, 1)
             
             shader = gpu.shader.create_from_info(shader_info)

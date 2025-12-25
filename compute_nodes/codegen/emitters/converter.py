@@ -37,6 +37,17 @@ def emit_combine_xyz(op, ctx):
     return f"{lhs}vec3({x}, {y}, {z});"
 
 
+def emit_combine_xy(op, ctx):
+    """Emit combine XY operation - constructs vec2 from x, y."""
+    lhs = ctx['lhs']
+    param = ctx['param']
+    
+    x = param(op.inputs[0])
+    y = param(op.inputs[1])
+    
+    return f"{lhs}vec2({x}, {y});"
+
+
 def emit_separate_color(op, ctx):
     """Emit separate color operation - extracts components based on mode.
     

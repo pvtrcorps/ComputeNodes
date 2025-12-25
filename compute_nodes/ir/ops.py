@@ -85,6 +85,7 @@ class OpCode(Enum):
     SWIZZLE = auto()   # val.xyz
     CAST = auto()      # float(int_val)
     SEPARATE_XYZ = auto()    # vec3 -> x, y, z
+    COMBINE_XY = auto()      # x, y -> vec2
     COMBINE_XYZ = auto()     # x, y, z -> vec3
     SEPARATE_COLOR = auto()  # vec4 -> components (RGB/HSV/HSL mode)
     COMBINE_COLOR = auto()   # components -> vec4 (RGB/HSV/HSL mode)

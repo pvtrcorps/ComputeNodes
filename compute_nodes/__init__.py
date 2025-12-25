@@ -1,11 +1,12 @@
 import bpy
 from .nodetree import ComputeNodeTree, ComputeNode
-from .sockets import ComputeSocketBuffer
+from .sockets import ComputeSocketGrid, ComputeSocketBuffer
 from .nodes import node_classes as specific_nodes
 
 classes = [
     ComputeNodeTree,
     ComputeNode,
+    ComputeSocketGrid,
     ComputeSocketBuffer,
 ] + specific_nodes
 

@@ -21,20 +21,40 @@ def handle_position(node, ctx):
     out_key = get_socket_key(node.outputs[0])  # "Coordinate"
     socket_value_map[out_key] = val_pos
 
-    # Normalized Output
+    # Normalized Output using u_dispatch uniforms (correct size)
     if len(node.outputs) > 1:
-        val_num_wg = builder.builtin("gl_NumWorkGroups", DataType.UVEC3)
-        val_wg_size = builder.builtin("gl_WorkGroupSize", DataType.UVEC3)
+        # Use u_dispatch_width/height uniforms instead of gl_WorkGroups
+        # These are set per-pass to the actual dispatch/output size
+        val_width = builder.builtin("u_dispatch_width", DataType.INT)
+        val_height = builder.builtin("u_dispatch_height", DataType.INT)
         
-        op_size = builder.add_op(OpCode.MUL, [val_num_wg, val_wg_size])
-        val_size = builder._new_value(ValueKind.SSA, DataType.UVEC3, origin=op_size)
-        op_size.add_output(val_size)
+        # Build vec2(width, height) for division
+        val_width_f = builder.cast(val_width, DataType.FLOAT)
+        val_height_f = builder.cast(val_height, DataType.FLOAT)
         
-        val_size_f = builder.cast(val_size, DataType.VEC3)
+        # Construct size vec2 using combine
+        op_size = builder.add_op(OpCode.COMBINE_XY, [val_width_f, val_height_f])
+        val_size_vec2 = builder._new_value(ValueKind.SSA, DataType.VEC2, origin=op_size)
+        op_size.add_output(val_size_vec2)
         
-        op_div = builder.add_op(OpCode.DIV, [val_pos, val_size_f])
-        val_norm = builder._new_value(ValueKind.SSA, DataType.VEC3, origin=op_div)
-        op_div.add_output(val_norm)
+        # Get xy position as vec2
+        val_pos_xy = builder.swizzle(val_pos, "xy")
+        
+        # Normalize: pos.xy / size
+        op_div = builder.add_op(OpCode.DIV, [val_pos_xy, val_size_vec2])
+        val_norm_xy = builder._new_value(ValueKind.SSA, DataType.VEC2, origin=op_div)
+        op_div.add_output(val_norm_xy)
+        
+        # Extend vec2 to vec3 using CONSTRUCT(vec2, 0) - which GLSL supports directly
+        # Use CAST to vec3 which will become vec3(v, 0) or just output the vec2
+        # Actually, let's extract x,y and use COMBINE_XYZ properly
+        val_norm_x = builder.swizzle(val_norm_xy, "x")
+        val_norm_y = builder.swizzle(val_norm_xy, "y")
+        val_zero = builder.constant(0.0, DataType.FLOAT)
+        
+        op_extend = builder.add_op(OpCode.COMBINE_XYZ, [val_norm_x, val_norm_y, val_zero])
+        val_norm = builder._new_value(ValueKind.SSA, DataType.VEC3, origin=op_extend)
+        op_extend.add_output(val_norm)
         
         out_key_norm = get_socket_key(node.outputs[1])
         socket_value_map[out_key_norm] = val_norm

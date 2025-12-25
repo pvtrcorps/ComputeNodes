@@ -1,5 +1,24 @@
 # Plan de Diseño Profesional para "ComputeNodes" (Blender 5.0+ Addon)
 
+---
+
+> [!IMPORTANT]
+> ## 🔄 ACTUALIZACIÓN ARQUITECTÓNICA CRÍTICA (Diciembre 2025)
+> 
+> **Paradigma Field-Based implementado** - Similar a Geometry Nodes Fields:
+> 
+> | Antes | Ahora |
+> |-------|-------|
+> | Output tenía width/height | Output **sin resolución**, solo recibe Texture |
+> | Resize aceptaba Color | Resize **Texture→Texture** |
+> | Position usaba gl_WorkGroups | Position usa **u_dispatch uniforms** del Rasterize |
+> 
+> **Regla fundamental**: `Field → Texture` SOLO via **Rasterize**. Output NO materializa.
+> 
+> Ver `hoja_de_diseño_compute_nodes.md` Sección 2.5 para detalles completos.
+
+---
+
 ## **Introducción y Estado Actual del MVP**
 
 El addon **ComputeNodes** es un prototipo de sistema de **nodos de cómputo GPU** para Blender 4.x/5.x, enfocado en procesar imágenes 2D mediante _compute shaders_. Emplea un **árbol de nodos personalizado** (ComputeNodeTree) con nodos que generan código GLSL y ejecutan en GPU. Actualmente, el MVP soporta operaciones matemáticas básicas, texturas procedurales (ruido, voronoi, etc.), manipulación de vectores y color, bucles sencillos y E/S de imágenes. La arquitectura interna se basa en una representación intermedia (_IR_) SSA con opcodes definidos, un planificador de _passes_ de cómputo y un ejecutor que usa la API GPU de Blender.

@@ -40,8 +40,13 @@ node_categories = [
         NodeItem("ComputeNodeMapRange"),
         NodeItem("ComputeNodeClamp"),
     ]),
+    ComputeNodeCategory("COMPUTE_GRID", "Grid", items=[
+        NodeItem("ComputeNodeCapture"),
+        NodeItem("ComputeNodeResize"),
+        NodeItem("ComputeNodeDistort"),
+    ]),
     ComputeNodeCategory("COMPUTE_OUTPUT", "Output", items=[
-        NodeItem("ComputeNodeOutput"),
+        NodeItem("ComputeNodeOutputImage"),
     ]),
 ]
 

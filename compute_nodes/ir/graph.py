@@ -242,4 +242,32 @@ class IRBuilder:
         v = self._new_value(ValueKind.SSA, DataType.VEC4, origin=op)
         op.add_output(v)
         return v
+    
+    def div(self, a: Value, b: Value) -> Value:
+        """Division helper."""
+        return self.binary(OpCode.DIV, a, b)
+    
+    def sample(self, sampler: Value, coord: Value) -> Value:
+        """Texture sampling (texture(sampler, uv))."""
+        op = self.add_op(OpCode.SAMPLE, [sampler, coord])
+        v = self._new_value(ValueKind.SSA, DataType.VEC4, origin=op)
+        op.add_output(v)
+        return v
+    
+    def emit(self, opcode: OpCode, inputs: List[Value], result_type: DataType) -> Value:
+        """
+        Generic emit for any operation with a single output.
+        
+        Args:
+            opcode: The operation code
+            inputs: List of input values
+            result_type: The type of the result value
+            
+        Returns:
+            The output Value
+        """
+        op = self.add_op(opcode, inputs)
+        v = self._new_value(ValueKind.SSA, result_type, origin=op)
+        op.add_output(v)
+        return v
 

@@ -51,10 +51,44 @@ class TextureManager:
             raise
 
     def ensure_internal_texture(self, name: str, desc: ImageDesc) -> gpu.types.GPUTexture:
-        """Get or create an internal GPU texture based on the descriptor."""
-        width, height = desc.size
+        """Get or create an internal GPU texture based on the descriptor.
+        
+        Supports 1D, 2D, and 3D textures based on desc.dimensions.
+        """
         fmt = desc.format.upper() if desc.format else "RGBA32F"
-        return self.create_storage_texture(name, width, height, fmt)
+        dims = getattr(desc, 'dimensions', 2)
+        
+        # Determine size tuple based on dimensions
+        if dims == 1:
+            size = (desc.width,)
+        elif dims == 3:
+            size = (desc.width, desc.height, desc.depth)
+        else:
+            size = (desc.width, desc.height)
+        
+        # Check cache
+        if name in self._internal_textures:
+            existing = self._internal_textures[name]
+            # Verify dimensions match
+            if dims == 1:
+                if existing.width == size[0]:
+                    return existing
+            elif dims == 3:
+                # Note: GPUTexture might not expose depth, so recreate if needed
+                if existing.width == size[0] and existing.height == size[1]:
+                    return existing
+            else:
+                if existing.width == size[0] and existing.height == size[1]:
+                    return existing
+        
+        try:
+            texture = gpu.types.GPUTexture(size, format=fmt)
+            self._internal_textures[name] = texture
+            logger.debug(f"Created {dims}D texture '{name}': {size}, format={fmt}")
+            return texture
+        except Exception as e:
+            logger.error(f"Failed to create {dims}D texture {name}: {e}")
+            raise
 
     def readback_to_image(self, texture: gpu.types.GPUTexture, 
                           image: bpy.types.Image) -> bool:

@@ -99,30 +99,44 @@ class ShaderGenerator:
         return "\n".join(lines)
 
     def _generate_main(self, compute_pass: ComputePass) -> str:
-        lines = ["void main() {"]
+        # Store current pass for emitter context
+        self._current_pass = compute_pass
         
-        # Emit ops in order
+        lines = ["void main() {"]
         for op in compute_pass.ops:
             lines.append(self._emit_op(op))
-            
         lines.append("}")
         return "\n".join(lines)
 
 
     def _param(self, val: Value) -> str:
         """Resolves a value to its GLSL string representation."""
-        # Treat CONSTANT same as SSA (use the emitted variable)
-        # This avoids re-formatting complex Blender values inline
-        if val.kind == ValueKind.SSA or val.kind == ValueKind.CONSTANT:
+        # Track emitted IDs for current pass
+        if not hasattr(self, '_emitted_ids'):
+            self._emitted_ids = set()
+        
+        if val.kind == ValueKind.SSA:
             return f"v{val.id}"
+        elif val.kind == ValueKind.CONSTANT:
+            # If constant already emitted, use its variable
+            if val.id in self._emitted_ids:
+                return f"v{val.id}"
+            # Otherwise, emit inline
+            if val.origin and hasattr(val.origin, 'attrs'):
+                const_val = val.origin.attrs.get('value')
+                return self._format_constant(const_val, val.type)
+            return f"v{val.id}"  # Fallback
         elif val.kind == ValueKind.ARGUMENT:
             # Resource Handle -> Use the uniform name generated in bindings
             return f"img_{val.resource_index}"
         elif val.kind == ValueKind.BUILTIN:
-            # Map name to GLSL intrinsic
-            # name_hint holds "gl_GlobalInvocationID" etc
             return val.name_hint
         return "UNKNOWN"
+    
+    def _format_constant(self, value, dtype: DataType) -> str:
+        """Format a Python value as GLSL literal."""
+        from .emitters.const import format_constant
+        return format_constant(value, dtype)
 
     def _sanitize_name(self, name: str) -> str:
         # Replace non-alphanumeric chars with underscore
@@ -158,11 +172,21 @@ class ShaderGenerator:
             lhs = "    "
 
         # Build context for emitter
+        dispatch = getattr(self, '_current_pass', None)
+        dispatch_size = dispatch.dispatch_size if dispatch else (512, 512, 1)
+        
+        # Build set of op IDs in current pass for cross-pass detection
+        current_op_ids = set()
+        if dispatch and hasattr(dispatch, 'ops'):
+            current_op_ids = {id(op) for op in dispatch.ops}
+        
         ctx = {
             'lhs': lhs,
             'param': self._param,
             'type_str': self._type_str,
             'graph': self.graph,
+            'dispatch_size': dispatch_size,
+            'op_ids': current_op_ids,
         }
         
         # Look up emitter in registry
