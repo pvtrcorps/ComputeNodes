@@ -5,8 +5,10 @@ from .types import DataType
 
 class ResourceType(Enum):
     SAMPLER_2D = auto() # Filtered reading (texture())
-    IMAGE_2D = auto()   # Storage reading/writing (imageLoad/Store)
-    BUFFER_1D = auto()  # Storage buffer (SSBO) or Uniform Buffer (UBO)
+    IMAGE_1D = auto()   # Storage 1D (imageLoad/Store) - for buffer emulation
+    IMAGE_2D = auto()   # Storage 2D (imageLoad/Store)
+    IMAGE_3D = auto()   # Storage 3D (imageLoad/Store) - for volumes
+    BUFFER_1D = auto()  # Storage buffer (SSBO) or Uniform Buffer (UBO) - future
 
 class ResourceAccess(Enum):
     READ = auto()
@@ -25,14 +27,42 @@ class ResourceDesc:
 @dataclass(unsafe_hash=True)
 class ImageDesc(ResourceDesc):
     """
-    Descriptor for Storage Images (image2D).
+    Descriptor for Storage Images (image1D, image2D, image3D).
+    
+    Supports 1D, 2D, and 3D textures via the 'dimensions' field.
+    Size tuple length should match dimensions:
+      - 1D: (width,)
+      - 2D: (width, height)  
+      - 3D: (width, height, depth)
     """
     format: str = "rgba32f"
-    size: tuple = (0, 0) # (width, height), 0 means "context dependent"
+    size: tuple = (0, 0)  # Variable length based on dimensions
     access: ResourceAccess = ResourceAccess.READ_WRITE
+    dimensions: int = 2   # 1, 2, or 3
     
     def __post_init__(self):
-        self.type = ResourceType.IMAGE_2D
+        # Set appropriate resource type based on dimensions
+        if self.dimensions == 1:
+            self.type = ResourceType.IMAGE_1D
+        elif self.dimensions == 3:
+            self.type = ResourceType.IMAGE_3D
+        else:
+            self.type = ResourceType.IMAGE_2D
+    
+    @property
+    def width(self) -> int:
+        """Get width (first dimension)."""
+        return self.size[0] if len(self.size) > 0 else 0
+    
+    @property
+    def height(self) -> int:
+        """Get height (second dimension). Returns 1 for 1D textures."""
+        return self.size[1] if len(self.size) > 1 else 1
+    
+    @property
+    def depth(self) -> int:
+        """Get depth (third dimension). Returns 1 for 1D/2D textures."""
+        return self.size[2] if len(self.size) > 2 else 1
 
 @dataclass(unsafe_hash=True)
 class SamplerDesc(ResourceDesc):

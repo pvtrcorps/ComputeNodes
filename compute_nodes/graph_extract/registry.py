@@ -6,6 +6,7 @@ from .handlers.math_ops import handle_math, handle_vector_math
 from .handlers.textures import handle_noise_texture, handle_white_noise, handle_voronoi_texture
 from .handlers.control_flow import handle_position, handle_switch, handle_mix, handle_repeat_output, handle_repeat_input
 from .handlers.converter import handle_separate_xyz, handle_combine_xyz, handle_separate_color, handle_combine_color, handle_map_range, handle_clamp
+from .handlers.output import handle_output
 
 # Registry mapping node bl_idname to handler function
 HANDLER_REGISTRY = {
@@ -14,6 +15,9 @@ HANDLER_REGISTRY = {
     'ComputeNodeImageWrite': handle_image_write,
     'ComputeNodeImageInfo': handle_image_info,
     'ComputeNodeSample': handle_sample,
+    
+    # Output
+    'ComputeNodeOutput': handle_output,
     
     # Math
     'ComputeNodeMath': handle_math,

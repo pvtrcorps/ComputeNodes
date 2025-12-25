@@ -10,7 +10,7 @@ class ComputeNodeImageInput(ComputeNode):
     image: PointerProperty(type=bpy.types.Image, name="Image")
     
     def init(self, context):
-        self.outputs.new('ComputeSocketImage', "Image")
+        self.outputs.new('NodeSocketImage', "Image")
         
     def draw_buttons(self, context, layout):
         layout.template_ID(self, "image", open="image.open")
@@ -24,7 +24,7 @@ class ComputeNodeImageWrite(ComputeNode):
     
     def init(self, context):
         # Outputs a resource handle valid for writing
-        self.outputs.new('ComputeSocketImage', "Image")
+        self.outputs.new('NodeSocketImage', "Image")
         
     def draw_buttons(self, context, layout):
         layout.template_ID(self, "image", open="image.open")
@@ -34,6 +34,7 @@ class ComputeNodeImageInfo(ComputeNode):
     bl_label = 'Image Info'
     
     def init(self, context):
-        self.inputs.new('ComputeSocketImage', "Image")
+        self.inputs.new('NodeSocketImage', "Image")
         self.outputs.new('NodeSocketVector', "Size") # vec2 (w, h)
         # Maybe format info later
+

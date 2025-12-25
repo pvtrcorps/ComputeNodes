@@ -5,7 +5,6 @@ import logging
 from typing import Dict, Set
 
 from ..ir.graph import Graph, IRBuilder, Value, ValueKind
-from ..ir.ops import OpCode
 from ..ir.resources import ImageDesc, ResourceAccess
 from ..ir.types import DataType
 
@@ -78,8 +77,8 @@ def extract_graph(nodetree) -> Graph:
         else:
             # Not linked: Use default value
             if hasattr(socket, "default_value"):
-                # Handle ComputeSocketImage default value (PointerProperty)
-                if socket.bl_idname == 'ComputeSocketImage':
+                # Handle NodeSocketImage default value (native Blender Image pointer)
+                if socket.bl_idname == 'NodeSocketImage':
                     img = socket.default_value
                     if not img:
                         return None
@@ -134,47 +133,23 @@ def extract_graph(nodetree) -> Graph:
         finally:
             recursion_stack.remove(node_key)
 
-    # Process all output nodes
+    # Process all output nodes via their registered handlers
     for output_node in output_nodes:
-        # NEW DESIGN: Get properties from node instead of socket
-        output_name = output_node.output_name
-        output_width = output_node.width
-        output_height = output_node.height
-        output_format = output_node.format
+        # Build context for handler
+        ctx = {
+            'builder': builder,
+            'socket_value_map': socket_value_map,
+            'get_socket_key': get_socket_key,
+            'get_socket_value': get_socket_value,
+            'output_socket_needed': None,
+        }
         
-        # Create ImageDesc for the output
-        desc = ImageDesc(
-            name=output_name,
-            access=ResourceAccess.WRITE,
-            format=output_format,
-            size=(output_width, output_height)
-        )
-        val_target = builder.add_resource(desc)
-        
-        # Data socket is now inputs[0] (Color)
-        data_socket = output_node.inputs[0]
-        
-        # Data to Write
-        val_data = get_socket_value(data_socket)
-        if val_data is None:
-            logger.warning(f"Output node {output_node.name} has no data to write")
-            continue
-            
-        # Ensure VEC4 for RGBA formats
-        if val_data.type == DataType.VEC3:
-            val_data = builder.cast(val_data, DataType.VEC4)
-        if val_data.type == DataType.IVEC2:
-            val_data = builder.cast(val_data, DataType.VEC4)
-        if val_data.type == DataType.FLOAT:
-            val_data = builder.cast(val_data, DataType.VEC4)
-        
-        # Coord construction
-        val_gid = builder.builtin("gl_GlobalInvocationID", DataType.UVEC3)
-        val_coord_uvec = builder.swizzle(val_gid, "xy")
-        val_coord_ivec = builder.cast(val_coord_uvec, DataType.IVEC2)
-        
-        # Image Store
-        builder.image_store(val_target, val_coord_ivec, val_data)
+        # Use the registered handler for output nodes
+        handler = get_handler(output_node.bl_idname)
+        if handler:
+            handler(output_node, ctx)
+        else:
+            logger.error(f"No handler registered for {output_node.bl_idname}")
     
     return graph
 

@@ -18,6 +18,6 @@ class ComputeNodeSample(ComputeNode):
     bl_icon = 'EYEDROPPER'
     
     def init(self, context):
-        self.inputs.new('ComputeSocketImage', "Image")
+        self.inputs.new('NodeSocketImage', "Image")
         self.inputs.new('NodeSocketVector', "Coordinate")
         self.outputs.new('NodeSocketColor', "Color")

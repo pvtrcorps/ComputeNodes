@@ -1,23 +1,11 @@
 import bpy
 from bpy.types import NodeSocket
 
-class ComputeSocketImage(NodeSocket):
-    bl_idname = 'ComputeSocketImage'
-    bl_label = 'Image'
-    
-    default_value: bpy.props.PointerProperty(type=bpy.types.Image, name="Image")
-
-    # Custom color for Image sockets (e.g. Orange)
-    def draw_color(self, context, node):
-        return (1.0, 0.6, 0.2, 1.0) 
-
-    def draw(self, context, layout, node, text):
-        if self.is_output or self.is_linked:
-            layout.label(text=text)
-        else:
-            layout.template_ID(self, "default_value", open="image.open", text=text)
+# NOTE: ComputeSocketImage removed - using native NodeSocketImage instead
+# This provides better Blender integration and native UI
 
 class ComputeSocketBuffer(NodeSocket):
+    """Custom socket for buffer data (future SSBO support)"""
     bl_idname = 'ComputeSocketBuffer'
     bl_label = 'Buffer'
     
@@ -27,3 +15,4 @@ class ComputeSocketBuffer(NodeSocket):
 
     def draw(self, context, layout, node, text):
         layout.label(text=text)
+
