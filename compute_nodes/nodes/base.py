@@ -1,28 +1,10 @@
 import bpy
-from . import *
 
-class ComputeNode(bpy.types.Node):
-    """Base class for all Compute Nodes"""
-    bl_label = "Compute Node"
-    
-    @classmethod
-    def poll(cls, ntree):
-        return ntree.bl_idname == 'ComputeNodeTree'
-        
-    def init(self, context):
-        pass
+# -----------------------------------------------------------------------------
+# ComputeNode Base Class Proxy
+# -----------------------------------------------------------------------------
+# This file is maintained for backward compatibility with imports.
+# The actual definition has been consolidated in compute_nodes/nodetree.py
+# to ensure a Single Source of Truth.
 
-    def copy(self, node):
-        pass
-        
-    def free(self):
-        pass
-        
-    def draw_buttons(self, context, layout):
-        pass
-        
-    def draw_buttons_ext(self, context, layout):
-        pass
-        
-    def draw_label(self):
-        return self.bl_label
+from ..nodetree import ComputeNode, _rounded_rect, _draw_polygon_color

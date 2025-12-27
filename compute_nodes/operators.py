@@ -21,11 +21,7 @@ def get_executor():
         _executor = ComputeExecutor(_texture_mgr, _shader_mgr)
     return _executor
 
-class ComputeExecuteOperator(bpy.types.Operator):
-    """Execute the current Compute Node Tree on GPU"""
-    bl_idname = "compute.execute_graph"
-    bl_label = "Execute Compute Graph"
-    
+
 def _generate_shader_for_item(item, generator):
     """Recursively generate GLSL for passes and PassLoops."""
     if isinstance(item, PassLoop):
@@ -114,6 +110,7 @@ from bpy.app.handlers import persistent
 
 
 
+
 class COMPUTE_PT_MainPanel(bpy.types.Panel):
     """Creates a Panel in the Compute Node Editor"""
     bl_label = "Compute Runtime"
@@ -136,9 +133,35 @@ class COMPUTE_PT_MainPanel(bpy.types.Panel):
         if tree:
             row.prop(tree, "auto_execute", text="", icon='FILE_REFRESH')
 
+class COMPUTE_PT_group_interface(bpy.types.Panel):
+    """Group Interface Panel for editing sockets"""
+    bl_label = "Group Interface"
+    bl_idname = "COMPUTE_PT_group_interface"
+    bl_space_type = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = "Group"
+
+    @classmethod
+    def poll(cls, context):
+        return (context.space_data.tree_type == 'ComputeNodeTree' and
+                context.space_data.node_tree is not None)
+
+    def draw(self, context):
+        layout = self.layout
+        tree = context.space_data.node_tree
+        
+        # Native Blender Interface Editor
+        try:
+            layout.template_node_tree_interface(tree.interface)
+        except AttributeError:
+            # Fallback for older Blender versions if interface API differs
+            layout.label(text="Interface editing requires Blender 4.0+")
+
+
 classes = (
     ComputeExecuteOperator,
     COMPUTE_PT_MainPanel,
+    COMPUTE_PT_group_interface,
 )
 
 def register():

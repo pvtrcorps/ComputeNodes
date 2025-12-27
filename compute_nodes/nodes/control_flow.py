@@ -6,6 +6,7 @@ class ComputeNodeSwitch(ComputeNode):
     bl_idname = 'ComputeNodeSwitch'
     bl_label = 'Switch'
     bl_icon = 'QUESTION'
+    node_category = "CONTROL"
     
     data_type: EnumProperty(
         name="Data Type",
@@ -51,6 +52,7 @@ class ComputeNodeMix(ComputeNode):
     bl_idname = 'ComputeNodeMix'
     bl_label = 'Mix'
     bl_icon = 'GROUP_VCOL'
+    node_category = "CONTROL"
     
     data_type: EnumProperty(
         name="Data Type",

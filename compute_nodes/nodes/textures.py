@@ -7,12 +7,13 @@ class ComputeNodeNoiseTexture(ComputeNode):
     bl_idname = 'ComputeNodeNoiseTexture'
     bl_label = 'Noise Texture'
     bl_icon = 'TEXTURE'
+    node_category = "TEXTURE"
     
     def update_sockets(self, context):
-        self.inputs['Vector'].hide = (self.dimensions == '1D')
-        self.inputs['W'].hide = (self.dimensions not in {'1D', '4D'})
+        self.inputs['Vector'].hide = (self.dim_mode == '1D')
+        self.inputs['W'].hide = (self.dim_mode not in {'1D', '4D'})
 
-    dimensions: EnumProperty(
+    dim_mode: EnumProperty(
         name="Dimensions",
         items=[
             ('1D', "1D", "Use 1D noise"),
@@ -32,6 +33,7 @@ class ComputeNodeNoiseTexture(ComputeNode):
     )
     
     def init(self, context):
+        self.apply_node_color()
         self.inputs.new('NodeSocketVector', "Vector")
         self.inputs.new('NodeSocketFloat', "W")
         self.inputs.new('NodeSocketFloat', "Scale").default_value = 5.0
@@ -46,16 +48,18 @@ class ComputeNodeNoiseTexture(ComputeNode):
         self.update_sockets(context)
         
     def draw_buttons(self, context, layout):
-        layout.prop(self, "dimensions", text="")
+        layout.prop(self, "dim_mode", text="")
         layout.prop(self, "normalize")
         
     def draw_label(self):
+        self._draw_node_color()
         return "Noise Texture"
 
 class ComputeNodeWhiteNoise(ComputeNode):
     bl_idname = 'ComputeNodeWhiteNoise'
     bl_label = 'White Noise'
     bl_icon = 'TEXTURE'
+    node_category = "TEXTURE"
     
     def update_sockets(self, context):
         self.inputs['Vector'].hide = (self.dimensions == '1D')
@@ -74,6 +78,7 @@ class ComputeNodeWhiteNoise(ComputeNode):
     )
     
     def init(self, context):
+        self.apply_node_color()
         self.inputs.new('NodeSocketVector', "Vector")
         self.inputs.new('NodeSocketFloat', "W")
         
@@ -83,21 +88,23 @@ class ComputeNodeWhiteNoise(ComputeNode):
         self.update_sockets(context)
         
     def draw_buttons(self, context, layout):
-        layout.prop(self, "dimensions", text="")
+        layout.prop(self, "dim_mode", text="")
         
 
     def draw_label(self):
+        self._draw_node_color()
         return "White Noise"
 
 class ComputeNodeVoronoiTexture(ComputeNode):
     bl_idname = 'ComputeNodeVoronoiTexture'
     bl_label = 'Voronoi Texture'
     bl_icon = 'TEXTURE'
+    node_category = "TEXTURE"
     
     def update_sockets(self, context):
         # Inputs
-        self.inputs['Vector'].hide = (self.dimensions == '1D')
-        self.inputs['W'].hide = (self.dimensions not in {'1D', '4D'})
+        self.inputs['Vector'].hide = (self.dim_mode == '1D')
+        self.inputs['W'].hide = (self.dim_mode not in {'1D', '4D'})
         self.inputs['Smoothness'].hide = (self.feature != 'SMOOTH_F1')
         self.inputs['Exponent'].hide = (self.metric != 'MINKOWSKI')
         
@@ -108,7 +115,7 @@ class ComputeNodeVoronoiTexture(ComputeNode):
         self.outputs['Radius'].hide = (self.feature != 'N_SPHERE_RADIUS')
         self.outputs['W'].hide = True # Usually not used in standard Voronoi node?
 
-    dimensions: EnumProperty(
+    dim_mode: EnumProperty(
         name="Dimensions",
         items=[
             ('1D', "1D", "Use 1D noise"),
@@ -153,6 +160,7 @@ class ComputeNodeVoronoiTexture(ComputeNode):
     )
     
     def init(self, context):
+        self.apply_node_color()
         self.inputs.new('NodeSocketVector', "Vector")
         self.inputs.new('NodeSocketFloat', "W")
         self.inputs.new('NodeSocketFloat', "Scale").default_value = 5.0
@@ -172,10 +180,11 @@ class ComputeNodeVoronoiTexture(ComputeNode):
         self.update_sockets(context)
         
     def draw_buttons(self, context, layout):
-        layout.prop(self, "dimensions", text="")
+        layout.prop(self, "dim_mode", text="")
         layout.prop(self, "feature", text="")
         layout.prop(self, "metric", text="")
         layout.prop(self, "normalize")
         
     def draw_label(self):
+        self._draw_node_color()
         return "Voronoi Texture"

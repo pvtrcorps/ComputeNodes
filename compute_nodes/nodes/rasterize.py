@@ -22,9 +22,11 @@ class ComputeNodeCapture(ComputeNode):
     bl_idname = 'ComputeNodeCapture'
     bl_label = 'Capture'
     bl_icon = 'RENDERLAYERS'
+    node_category = "GRID"
     
     # Grid dimensions
-    dimensions: EnumProperty(
+    # Grid dimensions (renamed from dimensions to avoid conflict with node size)
+    dim_mode: EnumProperty(
         name="Dimensions",
         items=[
             ('2D', "2D", "Image: width × height"),
@@ -60,17 +62,22 @@ class ComputeNodeCapture(ComputeNode):
     )
     
     def init(self, context):
+        self.apply_node_color()
         # Input: procedural field/color value
         self.inputs.new('NodeSocketColor', "Field")
         # Output: Grid handle (cyan socket)
         self.outputs.new('ComputeSocketGrid', "Grid")
         
+    def draw_label(self):
+        self._draw_node_color()
+        return self.bl_label
+        
     def draw_buttons(self, context, layout):
-        layout.prop(self, "dimensions")
+        layout.prop(self, "dim_mode")
         col = layout.column(align=True)
         col.prop(self, "width")
         col.prop(self, "height")
-        if self.dimensions == '3D':
+        if self.dim_mode == '3D':
             col.prop(self, "depth")
 
 

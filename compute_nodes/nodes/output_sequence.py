@@ -33,6 +33,7 @@ class ComputeNodeOutputSequence(ComputeNode):
     bl_idname = 'ComputeNodeOutputSequence'
     bl_label = 'Output Sequence'
     bl_icon = 'FILE_MOVIE'
+    node_category = "OUTPUT"
     
     base_name: StringProperty(
         name="Base Name",

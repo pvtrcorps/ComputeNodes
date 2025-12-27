@@ -12,6 +12,7 @@ from .handlers.output_sequence import handle_output_sequence
 from .handlers.resize import handle_resize
 from .handlers.rasterize import handle_capture
 from .handlers.viewer import handle_viewer
+from .handlers.nodegroup import handle_nodegroup, handle_group_input, handle_group_output
 
 # Registry mapping node bl_idname to handler function
 HANDLER_REGISTRY = {
@@ -51,6 +52,11 @@ HANDLER_REGISTRY = {
     # Grid Operations
     'ComputeNodeResize': handle_resize,
     'ComputeNodeCapture': handle_capture,
+    
+    # Node Groups
+    'ComputeNodeGroup': handle_nodegroup,
+    'ComputeNodeGroupInput': handle_group_input,
+    'ComputeNodeGroupOutput': handle_group_output,
     
     # Debug
     'ComputeNodeViewer': handle_viewer,

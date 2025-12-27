@@ -9,6 +9,7 @@ class ComputeNodeSeparateXYZ(ComputeNode):
     bl_idname = 'ComputeNodeSeparateXYZ'
     bl_label = 'Separate XYZ'
     bl_icon = 'ORIENTATION_GLOBAL'
+    node_category = "CONVERTER"
     
     def init(self, context):
         self.inputs.new('NodeSocketVector', "Vector")
@@ -21,6 +22,7 @@ class ComputeNodeSeparateXYZ(ComputeNode):
         pass
         
     def draw_label(self):
+        self._draw_node_color()
         return "Separate XYZ"
 
 
@@ -29,6 +31,7 @@ class ComputeNodeCombineXYZ(ComputeNode):
     bl_idname = 'ComputeNodeCombineXYZ'
     bl_label = 'Combine XYZ'
     bl_icon = 'ORIENTATION_GLOBAL'
+    node_category = "CONVERTER"
     
     def init(self, context):
         self.inputs.new('NodeSocketFloat', "X")
@@ -41,6 +44,7 @@ class ComputeNodeCombineXYZ(ComputeNode):
         pass
         
     def draw_label(self):
+        self._draw_node_color()
         return "Combine XYZ"
 
 
@@ -49,6 +53,7 @@ class ComputeNodeSeparateColor(ComputeNode):
     bl_idname = 'ComputeNodeSeparateColor'
     bl_label = 'Separate Color'
     bl_icon = 'COLOR'
+    node_category = "CONVERTER"
     
     def update_sockets(self, context):
         """Update socket names based on color mode."""
@@ -92,6 +97,7 @@ class ComputeNodeSeparateColor(ComputeNode):
         layout.prop(self, "mode", text="")
         
     def draw_label(self):
+        self._draw_node_color()
         return f"Separate Color"
 
 
@@ -100,6 +106,7 @@ class ComputeNodeCombineColor(ComputeNode):
     bl_idname = 'ComputeNodeCombineColor'
     bl_label = 'Combine Color'
     bl_icon = 'COLOR'
+    node_category = "CONVERTER"
     
     def update_sockets(self, context):
         """Update socket names based on color mode."""
@@ -143,6 +150,7 @@ class ComputeNodeCombineColor(ComputeNode):
         layout.prop(self, "mode", text="")
         
     def draw_label(self):
+        self._draw_node_color()
         return f"Combine Color"
 
 
@@ -151,6 +159,7 @@ class ComputeNodeMapRange(ComputeNode):
     bl_idname = 'ComputeNodeMapRange'
     bl_label = 'Map Range'
     bl_icon = 'DRIVER_DISTANCE'
+    node_category = "CONVERTER"
     
     def update_sockets(self, context):
         """Update socket visibility based on data type and interpolation."""
@@ -235,6 +244,7 @@ class ComputeNodeMapRange(ComputeNode):
         layout.prop(self, "clamp")
         
     def draw_label(self):
+        self._draw_node_color()
         return "Map Range"
 
 
@@ -243,6 +253,7 @@ class ComputeNodeClamp(ComputeNode):
     bl_idname = 'ComputeNodeClamp'
     bl_label = 'Clamp'
     bl_icon = 'CON_DISTLIMIT'
+    node_category = "CONVERTER"
     
     clamp_type: EnumProperty(
         name="Clamp Type",
@@ -265,4 +276,5 @@ class ComputeNodeClamp(ComputeNode):
         layout.prop(self, "clamp_type", text="")
         
     def draw_label(self):
+        self._draw_node_color()
         return "Clamp"

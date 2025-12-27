@@ -6,6 +6,7 @@ class ComputeNodeMath(ComputeNode):
     bl_idname = 'ComputeNodeMath'
     bl_label = 'Math'
     bl_icon = 'ADD'
+    node_category = "MATH"
     
     operation: EnumProperty(
         name="Operation",
@@ -105,4 +106,5 @@ class ComputeNodeMath(ComputeNode):
         layout.prop(self, "operation")
         
     def draw_label(self):
+        self._draw_node_color()
         return self.operation.replace("_", " ").title()

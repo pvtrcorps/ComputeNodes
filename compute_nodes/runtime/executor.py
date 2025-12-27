@@ -155,7 +155,13 @@ class ComputeExecutor:
 
     def _run_pass(self, graph, compute_pass: ComputePass, texture_map, context_width, context_height):
         """Execute a single compute pass with its specific dispatch size."""
+        # Generate shader source if not already set
         src = compute_pass.display_source or compute_pass.source
+        if not src:
+            from ..codegen.glsl import ShaderGenerator
+            gen = ShaderGenerator(graph)
+            src = gen.generate(compute_pass)
+            compute_pass.source = src
         
         # DEBUG: Log resource usage for this pass
         print(f"[DEBUG] Pass {compute_pass.id}: reads_idx={compute_pass.reads_idx}, writes_idx={compute_pass.writes_idx}")

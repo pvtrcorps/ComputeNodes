@@ -9,7 +9,7 @@ def update_dimensions(self, context):
     """Update socket visibility based on 2D/3D mode."""
     if 'Depth' in self.inputs:
         # Hide socket in 2D mode, show in 3D mode
-        self.inputs['Depth'].hide = (self.dimensions == '2D')
+        self.inputs['Depth'].hide = (self.dim_mode == '2D')
 
 
 class ComputeNodeResize(ComputeNode):
@@ -29,9 +29,11 @@ class ComputeNodeResize(ComputeNode):
     bl_idname = 'ComputeNodeResize'
     bl_label = 'Resize'
     bl_icon = 'FULLSCREEN_ENTER'
+    node_category = "GRID"
     
     # Dimensions mode (consistent with Capture)
-    dimensions: EnumProperty(
+    # Dimensions mode (consistent with Capture)
+    dim_mode: EnumProperty(
         name="Dimensions",
         items=[
             ('2D', "2D", "Image: width × height"),
@@ -53,12 +55,17 @@ class ComputeNodeResize(ComputeNode):
     )
     
     def init(self, context):
+        self.apply_node_color()
         self.inputs.new('ComputeSocketGrid', "Grid")
         # Resolution inputs - allow dynamic values
         self.inputs.new('NodeSocketInt', "Width")
         self.inputs.new('NodeSocketInt', "Height")
         self.inputs.new('NodeSocketInt', "Depth")
         self.outputs.new('ComputeSocketGrid', "Grid")
+        
+    def draw_label(self):
+        self._draw_node_color()
+        return self.bl_label
         
         # Set default values on sockets
         self.inputs['Width'].default_value = 512
@@ -69,7 +76,7 @@ class ComputeNodeResize(ComputeNode):
         self.inputs['Depth'].hide = True
         
     def draw_buttons(self, context, layout):
-        layout.prop(self, "dimensions")
+        layout.prop(self, "dim_mode")
         layout.prop(self, "interpolation")
 
 

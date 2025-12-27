@@ -6,6 +6,7 @@ class ComputeNodeVectorMath(ComputeNode):
     bl_idname = 'ComputeNodeVectorMath'
     bl_label = 'Vector Math'
     bl_icon = 'ADD'
+    node_category = "VECTOR"
     
     operation: EnumProperty(
         name="Operation",
@@ -108,4 +109,5 @@ class ComputeNodeVectorMath(ComputeNode):
         layout.prop(self, "operation")
         
     def draw_label(self):
+        self._draw_node_color()
         return self.operation.replace("_", " ").title()

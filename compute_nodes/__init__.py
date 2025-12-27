@@ -6,7 +6,7 @@ from .sockets import ComputeSocketGrid, ComputeSocketBuffer
 from .nodes.repeat import ComputeRepeatItem
 
 # Import node classes (excluding ComputeRepeatItem which is registered separately)
-from .nodes import node_classes as specific_nodes, repeat_module
+from .nodes import node_classes as specific_nodes, repeat_module, nodegroup_module
 
 # PropertyGroup must come before nodes that reference it
 classes = [
@@ -27,8 +27,11 @@ def register():
     operators.register()
     # Register repeat module extras (operators, panel)
     repeat_module.register()
+    # Register nodegroup operators
+    nodegroup_module.register()
 
 def unregister():
+    nodegroup_module.unregister()
     repeat_module.unregister()
     operators.unregister()
     categories.unregister()

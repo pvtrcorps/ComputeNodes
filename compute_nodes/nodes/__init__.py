@@ -12,6 +12,8 @@ from .converter import ComputeNodeSeparateXYZ, ComputeNodeCombineXYZ, ComputeNod
 from .resize import ComputeNodeResize
 from .rasterize import ComputeNodeCapture
 from .viewer import ComputeNodeViewer
+from .nodegroup import ComputeNodeGroup, ComputeNodeGroupInput, ComputeNodeGroupOutput, COMPUTE_OT_remove_group_socket
+from . import nodegroup as nodegroup_module  # For operator registrations
 
 node_classes = [
     ComputeNodeMath,
@@ -38,11 +40,21 @@ node_classes = [
     ComputeNodeResize,
     ComputeNodeCapture,
     ComputeNodeViewer,
+    ComputeNodeGroup,
+    ComputeNodeGroupInput,
+    ComputeNodeGroupOutput,
+]
+
+operator_classes = [
+    COMPUTE_OT_remove_group_socket,
 ]
 
 def register():
-    # Only exposing list of classes to be registered by main
-    pass
+    import bpy
+    for cls in operator_classes:
+        bpy.utils.register_class(cls)
 
 def unregister():
-    pass
+    import bpy
+    for cls in reversed(operator_classes):
+        bpy.utils.unregister_class(cls)
