@@ -16,6 +16,7 @@ from bpy.props import (
 )
 from ..nodetree import ComputeNode
 from ..sockets import ComputeSocketGrid, ComputeSocketEmpty
+from ..utils.sockets import with_sync_guard
 
 
 # =============================================================================
@@ -158,78 +159,71 @@ class ComputeNodeRepeatInput(ComputeNode):
             # Sync paired output
             self._sync_paired_output()
     
+    @with_sync_guard
     def _sync_sockets(self):
         """Rebuild sockets to match repeat_items collection."""
-        # Guard against recursive calls (links.new can trigger updates)
-        if getattr(self, '_syncing', False):
-            return
+        # Keep track of existing connections to restore
+        connections = {}
+        for socket in self.inputs:
+            if socket.is_linked and not self._is_extension_socket(socket):
+                for link in socket.links:
+                    connections[socket.name] = (link.from_node.name, link.from_socket.name)
         
-        self._syncing = True
-        try:
-            # Keep track of existing connections to restore
-            connections = {}
-            for socket in self.inputs:
-                if socket.is_linked and not self._is_extension_socket(socket):
-                    for link in socket.links:
-                        connections[socket.name] = (link.from_node.name, link.from_socket.name)
+        for socket in self.outputs:
+            if socket.is_linked and socket.name != "Iteration":
+                for link in socket.links:
+                    connections[socket.name] = (link.to_node.name, link.to_socket.name)
+        
+        # Clear dynamic sockets (keep Iterations input and Iteration output)
+        # Remove from end to avoid index issues
+        while len(self.inputs) > 1:
+            socket = self.inputs[-1]
+            if socket.name == "Iterations":
+                break
+            self.inputs.remove(socket)
+        
+        while len(self.outputs) > 1:
+            socket = self.outputs[-1]
+            if socket.name == "Iteration":
+                break
+            self.outputs.remove(socket)
+        
+        # Add sockets for each repeat item (create all first)
+        for item in self.repeat_items:
+            socket_type = item.socket_type
             
-            for socket in self.outputs:
-                if socket.is_linked and socket.name != "Iteration":
-                    for link in socket.links:
-                        connections[socket.name] = (link.to_node.name, link.to_socket.name)
+            # Input: Initial value
+            input_name = f"Initial: {item.name}"
+            self.inputs.new(socket_type, input_name)
             
-            # Clear dynamic sockets (keep Iterations input and Iteration output)
-            # Remove from end to avoid index issues
-            while len(self.inputs) > 1:
-                socket = self.inputs[-1]
-                if socket.name == "Iterations":
-                    break
-                self.inputs.remove(socket)
-            
-            while len(self.outputs) > 1:
-                socket = self.outputs[-1]
-                if socket.name == "Iteration":
-                    break
-                self.outputs.remove(socket)
-            
-            # Add sockets for each repeat item (create all first)
-            for item in self.repeat_items:
-                socket_type = item.socket_type
-                
-                # Input: Initial value
-                input_name = f"Initial: {item.name}"
-                self.inputs.new(socket_type, input_name)
-                
-                # Output: Current value (for use inside loop)
-                output_name = f"Current: {item.name}"
-                self.outputs.new(socket_type, output_name)
-            
-            # Re-add extension socket
-            self._ensure_extension_socket()
-            
-            # Restore connections AFTER all sockets are created
-            tree = self.id_data
-            for socket_name, (node_name, other_socket_name) in connections.items():
-                if socket_name in self.inputs:
-                    # Input connection: from other node to this
-                    if node_name in tree.nodes:
-                        other_node = tree.nodes[node_name]
-                        if other_socket_name in other_node.outputs:
-                            tree.links.new(
-                                other_node.outputs[other_socket_name],
-                                self.inputs[socket_name]
-                            )
-                elif socket_name in self.outputs:
-                    # Output connection: from this to other node
-                    if node_name in tree.nodes:
-                        other_node = tree.nodes[node_name]
-                        if other_socket_name in other_node.inputs:
-                            tree.links.new(
-                                self.outputs[socket_name],
-                                other_node.inputs[other_socket_name]
-                            )
-        finally:
-            self._syncing = False
+            # Output: Current value (for use inside loop)
+            output_name = f"Current: {item.name}"
+            self.outputs.new(socket_type, output_name)
+        
+        # Re-add extension socket
+        self._ensure_extension_socket()
+        
+        # Restore connections AFTER all sockets are created
+        tree = self.id_data
+        for socket_name, (node_name, other_socket_name) in connections.items():
+            if socket_name in self.inputs:
+                # Input connection: from other node to this
+                if node_name in tree.nodes:
+                    other_node = tree.nodes[node_name]
+                    if other_socket_name in other_node.outputs:
+                        tree.links.new(
+                            other_node.outputs[other_socket_name],
+                            self.inputs[socket_name]
+                        )
+            elif socket_name in self.outputs:
+                # Output connection: from this to other node
+                if node_name in tree.nodes:
+                    other_node = tree.nodes[node_name]
+                    if other_socket_name in other_node.inputs:
+                        tree.links.new(
+                            self.outputs[socket_name],
+                            other_node.inputs[other_socket_name]
+                        )
     
     def _sync_paired_output(self):
         """Synchronize state items to paired Repeat Output."""
@@ -309,43 +303,36 @@ class ComputeNodeRepeatOutput(ComputeNode):
         # Sockets will be created by pairing with RepeatInput
         pass
     
+    @with_sync_guard
     def _sync_sockets(self):
         """Rebuild sockets to match repeat_items collection from paired input."""
-        # Guard against recursive calls
-        if getattr(self, '_syncing', False):
+        # Clear all sockets
+        self.inputs.clear()
+        self.outputs.clear()
+        
+        # Get repeat_items from paired input
+        if not self.paired_input:
             return
         
-        self._syncing = True
-        try:
-            # Clear all sockets
-            self.inputs.clear()
-            self.outputs.clear()
+        node_tree = self.id_data
+        if not node_tree:
+            return
+        
+        paired = node_tree.nodes.get(self.paired_input)
+        if not paired or not hasattr(paired, 'repeat_items'):
+            return
+        
+        # Add sockets for each repeat item from paired input
+        for item in paired.repeat_items:
+            socket_type = item.socket_type
             
-            # Get repeat_items from paired input
-            if not self.paired_input:
-                return
+            # Input: Next value (computed inside loop)
+            input_name = f"Next: {item.name}"
+            self.inputs.new(socket_type, input_name)
             
-            node_tree = self.id_data
-            if not node_tree:
-                return
-            
-            paired = node_tree.nodes.get(self.paired_input)
-            if not paired or not hasattr(paired, 'repeat_items'):
-                return
-            
-            # Add sockets for each repeat item from paired input
-            for item in paired.repeat_items:
-                socket_type = item.socket_type
-                
-                # Input: Next value (computed inside loop)
-                input_name = f"Next: {item.name}"
-                self.inputs.new(socket_type, input_name)
-                
-                # Output: Final value (after all iterations)
-                output_name = f"Final: {item.name}"
-                self.outputs.new(socket_type, output_name)
-        finally:
-            self._syncing = False
+            # Output: Final value (after all iterations)
+            output_name = f"Final: {item.name}"
+            self.outputs.new(socket_type, output_name)
     
     def draw_buttons(self, context, layout):
         """Draw node body."""

@@ -174,57 +174,43 @@ class ComputeNodeGroupInput(ComputeNode):
     
     def sync_from_interface(self):
         """Rebuild outputs from tree.interface inputs."""
-        # Guard against recursive calls (which cause link loss)
+        from ..utils.sockets import (
+            with_sync_guard,
+            save_output_links_by_identifier,
+            restore_output_links
+        )
+        
+        # Guard against recursive calls
         if getattr(self, '_syncing', False):
             return
         
         tree = self.id_data
-        if not tree: return
+        if not tree:
+            return
         
         self._syncing = True
         try:
-            # We need to preserve the "Empty" socket at the end
-            # And preserve links on existing sockets if possible (by name match)
+            # Cache interface data BEFORE modifying sockets
+            interface_inputs = [
+                (item.name, item.socket_type) 
+                for item in tree.interface.items_tree 
+                if item.item_type == 'SOCKET' and item.in_out == 'INPUT'
+            ]
             
-            # Current sockets (excluding Empty)
-            current_sockets = [s for s in self.outputs if s.name != "Empty"]
+            # Save links using utilities
+            saved_links = save_output_links_by_identifier(self.outputs)
             
-            # IMPORTANT: Cache interface data as tuples BEFORE modifying sockets
-            # Blender's interface items can return stale data when accessed during socket modifications
-            interface_inputs = [(item.name, item.socket_type) for item in tree.interface.items_tree 
-                               if item.item_type == 'SOCKET' and item.in_out == 'INPUT']
-            
-            # Save links
-            saved_links = {}
-            for sock in self.outputs:
-                if sock.name != "Empty" and sock.is_linked:
-                     saved_links[sock.name] = []
-                     for link in sock.links:
-                         saved_links[sock.name].append((link.to_node.name, link.to_socket.identifier))
-            
+            # Clear and recreate sockets
             self.outputs.clear()
-        
+            
             for item_name, item_socket_type in interface_inputs:
-                # Our mapping: Interface INPUT -> Node OUTPUT
-                # Use shared mapping function
                 stype = map_socket_type(item_socket_type)
                 self.outputs.new(stype, item_name)
             
             self._ensure_empty_socket()
             
-            # IMPORTANT: Restore links AFTER all sockets are created
-            # During creation, socket references can be unstable in Blender
-            for item_name, _ in interface_inputs:
-                if item_name in saved_links:
-                    # Find the socket by name AFTER all sockets exist
-                    sock = self.outputs.get(item_name)
-                    if sock:
-                        for to_node, to_socket in saved_links[item_name]:
-                             node = tree.nodes.get(to_node)
-                             if node:
-                                 target_sock = next((s for s in node.inputs if s.identifier == to_socket), None)
-                                 if target_sock:
-                                     tree.links.new(sock, target_sock)
+            # Restore links using utilities
+            restore_output_links(tree, saved_links, self.outputs)
         finally:
             self._syncing = False
 
@@ -315,6 +301,12 @@ class ComputeNodeGroupOutput(ComputeNode):
         return self.bl_label
         
     def sync_from_interface(self):
+        from ..utils.sockets import (
+            with_sync_guard,
+            save_input_links_by_identifier,
+            restore_input_links
+        )
+        
         # Guard against recursive calls
         if getattr(self, '_syncing', False):
             return
@@ -324,39 +316,27 @@ class ComputeNodeGroupOutput(ComputeNode):
         
         self._syncing = True
         try:
-            # IMPORTANT: Cache interface data as tuples BEFORE modifying sockets
-            # Blender's interface items can return stale data when accessed during socket modifications
-            interface_outputs = [(item.name, item.socket_type) for item in tree.interface.items_tree 
-                               if item.item_type == 'SOCKET' and item.in_out == 'OUTPUT']
+            # Cache interface data BEFORE modifying sockets
+            interface_outputs = [
+                (item.name, item.socket_type) 
+                for item in tree.interface.items_tree 
+                if item.item_type == 'SOCKET' and item.in_out == 'OUTPUT'
+            ]
             
-            # Save links using identifier
-            saved_links = {}
-            for sock in self.inputs:
-                if sock.name != "Empty" and sock.is_linked:
-                     link = sock.links[0]
-                     saved_links[sock.name] = (link.from_node.name, link.from_socket.identifier)
-
+            # Save links using utilities
+            saved_links = save_input_links_by_identifier(self.inputs)
+            
+            # Clear and recreate sockets
             self.inputs.clear()
             
             for item_name, item_socket_type in interface_outputs:
-                # Use shared mapping function
                 stype = map_socket_type(item_socket_type)
                 self.inputs.new(stype, item_name)
             
             self._ensure_empty_socket()
             
-            # IMPORTANT: Restore links AFTER all sockets are created
-            # During creation, socket references can be unstable in Blender
-            for item_name, _ in interface_outputs:
-                if item_name in saved_links:
-                    sock = self.inputs.get(item_name)
-                    if sock:
-                        from_node, from_socket = saved_links[item_name]
-                        node = tree.nodes.get(from_node)
-                        if node:
-                            source_sock = next((s for s in node.outputs if s.identifier == from_socket), None)
-                            if source_sock:
-                                tree.links.new(source_sock, sock)
+            # Restore links using utilities
+            restore_input_links(tree, saved_links, self.inputs)
         finally:
             self._syncing = False
         
