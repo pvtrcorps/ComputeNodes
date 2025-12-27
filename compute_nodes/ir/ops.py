@@ -77,8 +77,16 @@ class OpCode(Enum):
     OR = auto()
     NOT = auto()
     SELECT = auto() # Ternary / If-Else
-    LOOP_START = auto() # Start of a loop block
-    LOOP_END = auto()   # End of a loop block
+    
+    # Per-pixel loops (within a single shader dispatch)
+    LOOP_START = auto() # Start of a per-pixel loop block
+    LOOP_END = auto()   # End of a per-pixel loop block
+    
+    # Multi-pass loops (across multiple GPU dispatches with ping-pong)
+    PASS_LOOP_BEGIN = auto()  # Marks start of multi-pass loop region
+    PASS_LOOP_END = auto()    # Marks end of multi-pass loop region
+    PASS_LOOP_READ = auto()   # Read from current iteration's input buffer
+    PASS_LOOP_WRITE = auto()  # Write to current iteration's output buffer
     
     # --- Constructors / Conversion ---
     CONSTRUCT = auto() # vec3(x,y,z)

@@ -1,23 +1,22 @@
 # Node Handler Registry
 # Maps bl_idname -> handler function
 
-from .handlers.images import handle_image_input, handle_image_write, handle_image_info, handle_sample
+from .handlers.images import handle_image_input, handle_image_info, handle_sample
 from .handlers.math_ops import handle_math, handle_vector_math
 from .handlers.textures import handle_noise_texture, handle_white_noise, handle_voronoi_texture
-from .handlers.control_flow import handle_position, handle_switch, handle_mix, handle_repeat_output, handle_repeat_input
+from .handlers.control_flow import handle_position, handle_switch, handle_mix
+from .handlers.repeat import handle_repeat_output, handle_repeat_input
 from .handlers.converter import handle_separate_xyz, handle_combine_xyz, handle_separate_color, handle_combine_color, handle_map_range, handle_clamp
 from .handlers.output import handle_output_image
 from .handlers.output_sequence import handle_output_sequence
 from .handlers.resize import handle_resize
 from .handlers.rasterize import handle_capture
-from .handlers.distort import handle_distort
-from .handlers.blur import handle_blur
+from .handlers.viewer import handle_viewer
 
 # Registry mapping node bl_idname to handler function
 HANDLER_REGISTRY = {
     # Images
     'ComputeNodeImageInput': handle_image_input,
-    'ComputeNodeImageWrite': handle_image_write,
     'ComputeNodeImageInfo': handle_image_info,
     'ComputeNodeSample': handle_sample,
     
@@ -52,8 +51,9 @@ HANDLER_REGISTRY = {
     # Grid Operations
     'ComputeNodeResize': handle_resize,
     'ComputeNodeCapture': handle_capture,
-    'ComputeNodeDistort': handle_distort,
-    'ComputeNodeBlur': handle_blur,
+    
+    # Debug
+    'ComputeNodeViewer': handle_viewer,
 }
 
 def get_handler(bl_idname):

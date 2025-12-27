@@ -1,5 +1,12 @@
 # Hoja de diseño — Compute Graph Engine para Blender (2D + 1D)
 
+> [!CAUTION]
+> ## ⚠️ DEPRECATED — See [GEMINI.md](./GEMINI.md)
+> This document is outdated. The authoritative design documentation is now in **GEMINI.md**.
+> This file is kept for historical reference only.
+
+---
+
 > **Documento Vivo - Actualizado: Diciembre 2025**
 >
 > **Estado:** En desarrollo activo (Fase Alpha).

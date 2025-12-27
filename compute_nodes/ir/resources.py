@@ -37,12 +37,21 @@ class ImageDesc(ResourceDesc):
     
     is_internal: If True, this is a GPU-only texture (Rasterize, Resize).
                  If False, this needs a Blender Image datablock (Output).
+    
+    dynamic_size: If True, size is computed at runtime (e.g., Resize in loop).
+                  The executor uses DynamicTexturePool for allocation.
+    
+    size_expression: When dynamic_size=True, contains Value objects or expressions
+                     that can be evaluated at runtime to determine actual size.
+                     Format: {'width': Value, 'height': Value, 'depth': Value}
     """
     format: str = "rgba32f"
     size: tuple = (0, 0)  # Variable length based on dimensions
     access: ResourceAccess = ResourceAccess.READ_WRITE
     dimensions: int = 2   # 1, 2, or 3
     is_internal: bool = True  # GPU-only by default
+    dynamic_size: bool = False  # True if size computed at runtime
+    size_expression: dict = field(default_factory=dict, compare=False, hash=False)  # Runtime size computation
     
     def __post_init__(self):
         # Set appropriate resource type based on dimensions

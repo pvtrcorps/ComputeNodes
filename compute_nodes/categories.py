@@ -10,7 +10,6 @@ class ComputeNodeCategory(NodeCategory):
 node_categories = [
     ComputeNodeCategory("COMPUTE_INPUT", "Input", items=[
         NodeItem("ComputeNodeImageInput"),
-        NodeItem("ComputeNodeImageWrite"),
         NodeItem("ComputeNodeImageInfo"),
         NodeItem("ComputeNodePosition"),
     ]),
@@ -43,12 +42,11 @@ node_categories = [
     ComputeNodeCategory("COMPUTE_GRID", "Grid", items=[
         NodeItem("ComputeNodeCapture"),
         NodeItem("ComputeNodeResize"),
-        NodeItem("ComputeNodeDistort"),
-        NodeItem("ComputeNodeBlur"),
     ]),
     ComputeNodeCategory("COMPUTE_OUTPUT", "Output", items=[
         NodeItem("ComputeNodeOutputImage"),
         NodeItem("ComputeNodeOutputSequence"),
+        NodeItem("ComputeNodeViewer"),
     ]),
 ]
 

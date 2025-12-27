@@ -2,6 +2,7 @@
 import bpy
 from .graph_extract import extract_graph
 from .planner.passes import ComputePass
+from .planner.loops import PassLoop
 from .ir.resources import ImageDesc
 from .planner.scheduler import schedule_passes
 from .codegen.glsl import ShaderGenerator
@@ -25,6 +26,17 @@ class ComputeExecuteOperator(bpy.types.Operator):
     bl_idname = "compute.execute_graph"
     bl_label = "Execute Compute Graph"
     
+def _generate_shader_for_item(item, generator):
+    """Recursively generate GLSL for passes and PassLoops."""
+    if isinstance(item, PassLoop):
+        # Generate shaders for all body passes inside the loop
+        for body_pass in item.body_passes:
+            _generate_shader_for_item(body_pass, generator)
+    else:
+        # Regular ComputePass
+        item.source = generator.generate(item)
+        item.display_source = item.source
+
 def execute_compute_tree(tree, context):
     """Core execution logic for a Compute Node Tree"""
     try:
@@ -34,11 +46,10 @@ def execute_compute_tree(tree, context):
         # 2. Analysis & Planning
         passes = schedule_passes(graph)
         
-        # 3. Code Generation
+        # 3. Code Generation (handles PassLoop recursively)
         generator = ShaderGenerator(graph)
         for p in passes:
-            p.source = generator.generate(p)
-            p.display_source = p.source
+            _generate_shader_for_item(p, generator)
             
         # 4. Execution
         executor = get_executor()

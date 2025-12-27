@@ -2,6 +2,7 @@
 # Handles: IMAGE_STORE, IMAGE_LOAD, IMAGE_SIZE, SAMPLE
 
 from ...ir.graph import ValueKind
+from ...ir.types import DataType
 
 
 def emit_image_store(op, ctx):
@@ -77,9 +78,22 @@ def emit_image_load(op, ctx):
         is_3d = getattr(res, 'dimensions', 2) == 3
     
     # Check if coord input is SSA (potentially from another pass)
+    # Check if coord input is SSA (potentially from another pass)
     coord_val = op.inputs[1]
-    from ...ir.graph import ValueKind
+    
+    # Determine if we should force inline global coords
+    force_inline = False
     if coord_val.kind == ValueKind.SSA:
+        # Check if origin is in current pass (Local SSA)
+        current_op_ids = ctx.get('op_ids', set())
+        if coord_val.origin and id(coord_val.origin) in current_op_ids:
+            # Local variable, safe to use directly
+            force_inline = False
+        else:
+            # Cross-pass reference, force inline to avoid undefined references
+            force_inline = True
+
+    if force_inline:
         # Use inline coords to avoid cross-pass issues
         if is_3d:
             coord = "ivec3(gl_GlobalInvocationID)"
@@ -88,12 +102,20 @@ def emit_image_load(op, ctx):
     else:
         coord = param(coord_val)
     
-    # Check if sampler
+    # Check if sampler or image
+    # If the resource is NOT written in this pass, it is bound as a sampler (READ_ONLY).
+    # If it IS written, it is bound as an image (READ_WRITE/WRITE_ONLY).
+    writes_idx = ctx.get('writes_idx', set())
+    
     if res_idx is not None:
-        res = graph.resources[res_idx]
-        if res.access.name == 'READ':
+        # Determine if it's bound as image (writable) or sampler (read-only)
+        is_image_binding = res_idx in writes_idx
+        
+        if not is_image_binding:
+            # It's a sampler, use texelFetch
             return f"{lhs}texelFetch({img}, {coord}, 0);"
     
+    # It's an image, use imageLoad
     return f"{lhs}imageLoad({img}, {coord});"
 
 
@@ -105,54 +127,62 @@ def emit_image_size(op, ctx):
     
     img = param(op.inputs[0])
     
-    # Check if sampler
+    # Check if sampler or image binding
+    writes_idx = ctx.get('writes_idx', set())
     res_idx = op.inputs[0].resource_index
+    
     if res_idx is not None:
-        res = graph.resources[res_idx]
-        if res.access.name == 'READ':
+        # If not written, it's a sampler
+        if res_idx not in writes_idx:
             return f"{lhs}textureSize({img}, 0);"
+    
+    return f"{lhs}imageSize({img});"
     
     return f"{lhs}imageSize({img});"
 
 
 def emit_sample(op, ctx):
     """
-    Emit texture sampling operation.
+    Emit texture sampling operation for 2D and 3D textures.
     
-    GLSL: texture(sampler, uv) for filtered sampling
-    Inputs: [sampler_resource, uv_coord]
+    GLSL Output depends on resource binding:
+        - If resource is READ-ONLY (sampler): texture(sampler2D, vec2)
+        - If resource is also WRITTEN (image): imageLoad(image2D, ivec2)
     
-    Grid Architecture:
-    - For Grid2D: texture(sampler2D, vec2)
-    - For Grid3D: texture(sampler3D, vec3)
-    - Auto-projection: If Grid is 3D but coords are 2D, project to vec3(uv, 0.0)
+    Coordinate Handling:
+        - If UV origin is in current pass: use actual UV value
+        - If UV is cross-pass reference or placeholder: use inline normalized coords
+        - Safety check: VEC2 coords extended to VEC3 with Z=0.5 for 3D textures
     
-    UV Handling:
-    - Check if UV is valid in current pass (its defining op is in current pass)
-    - If UV would be undefined (cross-pass reference), use inline normalized UVs
-    - Otherwise use actual UV value
+    Args:
+        op: The SAMPLE operation from IR
+        ctx: Emitter context with param, lhs, dispatch_size, graph, op_ids, reads_idx, writes_idx
+    
+    Returns:
+        GLSL code string for the texture() or imageLoad() call
     """
     lhs = ctx['lhs']
     dispatch_size = ctx.get('dispatch_size', (512, 512, 1))
     param = ctx['param']
-    current_op_ids = ctx.get('op_ids', set())  # Set of op IDs in current pass
+    current_op_ids = ctx.get('op_ids', set())
     graph = ctx.get('graph')
+    reads_idx = ctx.get('reads_idx', set())
+    writes_idx = ctx.get('writes_idx', set())
     
     sampler = param(op.inputs[0])
     uv_input = op.inputs[1]
     
-    # Determine if texture is 3D from resource
+    # Detect if texture is 3D from resource descriptor
     is_3d = False
     res_idx = op.inputs[0].resource_index
     if res_idx is not None and graph:
         res = graph.resources[res_idx]
         is_3d = getattr(res, 'dimensions', 2) == 3
     
-    # Determine if UV is usable in current pass
-    from ...ir.graph import ValueKind
-    from ...ir.types import DataType
+    # Check if resource is declared as image (also written) vs sampler (read-only)
+    is_image_binding = res_idx is not None and res_idx in writes_idx
     
-    # SSA values: check if their origin op is in current pass
+    # Check if UV is usable in current pass (origin op is in this pass)
     if uv_input.kind == ValueKind.SSA and uv_input.origin is not None:
         uv_op_id = id(uv_input.origin)
         uv_available = uv_op_id in current_op_ids
@@ -169,28 +199,38 @@ def emit_sample(op, ctx):
     else:
         uv_available = False
     
-    if uv_available:
-        # Use actual UV coords
-        uv = param(uv_input)
-        uv_type = uv_input.type
-    else:
-        # Use inline normalized UVs (for cross-pass or placeholder cases)
-        w, h, d = dispatch_size[0], dispatch_size[1], dispatch_size[2]
+    w, h, d = dispatch_size[0], dispatch_size[1], dispatch_size[2]
+    
+    if is_image_binding:
+        # Resource is bound as image2D (also written in this pass)
+        # Must use imageLoad with integer pixel coordinates
         if is_3d:
-            # 3D: use all three dimensions
-            uv = f"((vec3(gl_GlobalInvocationID.xyz) + vec3(0.5)) / vec3({float(w)}, {float(h)}, {float(d)}))"
-            uv_type = DataType.VEC3
+            coord = "ivec3(gl_GlobalInvocationID)"
         else:
-            uv = f"((vec2(gl_GlobalInvocationID.xy) + vec2(0.5)) / vec2({float(w)}, {float(h)}))"
-            uv_type = DataType.VEC2
-    
-    # Auto-projection: If texture is 3D but UV is 2D, project to vec3(uv, 0.0)
-    if is_3d:
-        if uv_available and uv_type == DataType.VEC2:
-            # Project 2D coords to 3D at Z=0
-            uv = f"vec3({uv}, 0.0)"
-        elif not uv_available and uv_type != DataType.VEC3:
-            # Inline UV already generated as vec3 above
-            pass
-    
-    return f"{lhs}texture({sampler}, {uv});"
+            coord = "ivec2(gl_GlobalInvocationID.xy)"
+        return f"{lhs}imageLoad({sampler}, {coord});"
+    else:
+        # Resource is bound as sampler2D (read-only in this pass)
+        # Use texture() with normalized UV coordinates
+        if uv_available:
+            # Use actual UV coords
+            uv = param(uv_input)
+            uv_type = uv_input.type
+        else:
+            # Use inline normalized UVs (for cross-pass or placeholder cases)
+            if is_3d:
+                # 3D: use all three dimensions from uniform
+                uv = "((vec3(gl_GlobalInvocationID.xyz) + vec3(0.5)) / vec3(u_dispatch_size))"
+                uv_type = DataType.VEC3
+            else:
+                # 2D: use xy from uniform
+                uv = "((vec2(gl_GlobalInvocationID.xy) + vec2(0.5)) / vec2(u_dispatch_size.xy))"
+                uv_type = DataType.VEC2
+        
+        # Type check: ensure coordinate matches texture dimensionality
+        # Handler should have already adjusted this, but safety check
+        if is_3d and uv_available and uv_type == DataType.VEC2:
+            # Edge case: still got VEC2 for 3D texture, project to middle slice
+            uv = f"vec3({uv}, 0.5)"
+        
+        return f"{lhs}texture({sampler}, {uv});"

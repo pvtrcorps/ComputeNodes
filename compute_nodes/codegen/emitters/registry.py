@@ -12,7 +12,7 @@ from .vector import emit_normalize, emit_reflect, emit_refract, emit_faceforward
 from .types import emit_constant, emit_builtin, emit_swizzle, emit_cast, emit_select
 from .images import emit_image_store, emit_image_load, emit_image_size, emit_sample
 from .textures import emit_noise, emit_white_noise, emit_voronoi
-from .control_flow import emit_loop_start, emit_loop_end
+from .control_flow import emit_loop_start, emit_loop_end, emit_pass_loop_begin, emit_pass_loop_end, emit_pass_loop_read, emit_pass_loop_write
 from .converter import emit_separate_xyz, emit_combine_xy, emit_combine_xyz, emit_separate_color, emit_combine_color, emit_map_range, emit_clamp_range
 from .blur import emit_blur
 
@@ -68,6 +68,7 @@ EMITTER_REGISTRY = {
     OpCode.MIN: lambda op, ctx: emit_minmax('min', op, ctx),
     OpCode.MAX: lambda op, ctx: emit_minmax('max', op, ctx),
     OpCode.CLAMP: lambda op, ctx: emit_minmax('clamp', op, ctx),
+    OpCode.MIX: lambda op, ctx: emit_minmax('mix', op, ctx),
     
     # Smooth operations
     OpCode.SMOOTH_MIN: emit_smooth,
@@ -110,6 +111,12 @@ EMITTER_REGISTRY = {
     # Control Flow
     OpCode.LOOP_START: emit_loop_start,
     OpCode.LOOP_END: emit_loop_end,
+    
+    # Multi-Pass Loop (no-ops - handled by executor)
+    OpCode.PASS_LOOP_BEGIN: emit_pass_loop_begin,
+    OpCode.PASS_LOOP_END: emit_pass_loop_end,
+    OpCode.PASS_LOOP_READ: emit_pass_loop_read,
+    OpCode.PASS_LOOP_WRITE: emit_pass_loop_write,
     
     # Converter
     OpCode.SEPARATE_XYZ: emit_separate_xyz,

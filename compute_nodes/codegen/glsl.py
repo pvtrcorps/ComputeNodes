@@ -5,47 +5,57 @@ from ..ir.types import DataType
 from ..ir.resources import ResourceDesc, ResourceType, ImageDesc
 from ..planner.passes import ComputePass
 
-from .shader_lib import HASH_GLSL, NOISE_GLSL, FRACTAL_GLSL, TEX_NOISE_GLSL, WHITE_NOISE_GLSL, VORONOI_GLSL, COLOR_GLSL, MAP_RANGE_GLSL
+# Tree-shaking registry for selective GLSL inclusion
+from .shader_lib.registry import (
+    generate_selective_header, 
+    get_bundle_requirements,
+    OPCODE_BUNDLE_REQUIREMENTS
+)
+
+# Mapping from OpCode to bundle keys
+OPCODE_TO_BUNDLE_KEY = {
+    OpCode.NOISE: 'noise',
+    OpCode.WHITE_NOISE: 'white_noise',
+    OpCode.VORONOI: 'voronoi',
+    OpCode.SEPARATE_COLOR: 'separate_color',
+    OpCode.COMBINE_COLOR: 'combine_color',
+    OpCode.MAP_RANGE: 'map_range',
+    OpCode.CLAMP_RANGE: 'map_range',  # Uses same bundle
+}
+
 
 class ShaderGenerator:
     """
     Generates GLSL Compute Shader code from a ComputePass.
+    
+    Uses tree-shaking to include only required GLSL library functions,
+    dramatically reducing shader compilation time.
     """
     def __init__(self, graph: Graph):
         self.graph = graph
 
     def generate(self, compute_pass: ComputePass) -> str:
-        sections = []
+        # Initialize tracking for tree-shaking
+        self._required_bundles: Set[str] = set()
+        self._required_funcs: Set[str] = set()
         
-        # 1. Header
-        sections.append(self._generate_header())
+        # 1. Generate main first to discover required GLSL functions
+        main_section = self._generate_main(compute_pass)
         
-        # 2. Bindings / Layouts
-        sections.append(self._generate_bindings(compute_pass))
+        # 2. Generate bindings
+        bindings_section = self._generate_bindings(compute_pass)
         
-        # 3. Main Function
-        sections.append(self._generate_main(compute_pass))
+        # 3. Generate selective header based on discovered requirements
+        header_section = self._generate_selective_header()
         
-        return "\n".join(sections)
+        return "\n".join([header_section, bindings_section, main_section])
 
-    def _generate_header(self) -> str:
-        lines = [
-            # NOTE: layout(local_size_x/y/z) is NOT included here
-            # Blender's GPUShaderCreateInfo.local_group_size() handles this
-            "",
-            # Inject Libraries
-            HASH_GLSL,
-            NOISE_GLSL,
-            FRACTAL_GLSL,
-            TEX_NOISE_GLSL,
-            WHITE_NOISE_GLSL,
-            VORONOI_GLSL,
-            COLOR_GLSL,
-            MAP_RANGE_GLSL,
-            ""
-        ]
-        return "\n".join(lines)
-
+    def _generate_selective_header(self) -> str:
+        """Generate minimal GLSL header with only needed functions."""
+        return generate_selective_header(
+            self._required_funcs, 
+            self._required_bundles
+        )
 
     def _generate_bindings(self, compute_pass: ComputePass) -> str:
         lines = []
@@ -59,12 +69,10 @@ class ShaderGenerator:
         for binding_idx, res_idx in enumerate(all_indices):
             res = self.graph.resources[res_idx]
             
-            # TODO: Determine format based on usage or metadata. Defaulting to rgba32f/float
-            # TODO: Determine format based on usage or metadata. Defaulting to rgba32f/float
             # Map Blender/GPUTexture formats to GLSL identifiers
             fmt_map = {
                 'RGBA8': 'rgba8',
-                'SRGB8_A8': 'rgba8', # Treat sRGB as rgba8 for storage (no auto-conversion in storage)
+                'SRGB8_A8': 'rgba8',
                 'RGBA16F': 'rgba16f',
                 'RGBA32F': 'rgba32f',
                 'R32F': 'r32f',
@@ -72,30 +80,26 @@ class ShaderGenerator:
                 'RGBA8I': 'rgba8i',
             }
             raw_fmt = res.format.upper()
-            fmt = fmt_map.get(raw_fmt, 'rgba32f') # Fallback to 32f if unknown
+            fmt = fmt_map.get(raw_fmt, 'rgba32f')
             
             # Determine restriction (readonly / writeonly / readwrite)
-            # Simplification: If in writes -> volatile/coherent or restrict?
-            # GLSL image binding qualifiers: writeonly, readonly
             qualifier = ""
             if res_idx in compute_pass.writes_idx and res_idx not in compute_pass.reads_idx:
                 qualifier = "writeonly "
             elif res_idx in compute_pass.reads_idx and res_idx not in compute_pass.writes_idx:
                 qualifier = "readonly "
             else:
-                qualifier = "" # readwrite default
+                qualifier = ""
 
             if isinstance(res, ImageDesc):
-                # image2D vs image3D etc. Assuming 2D
-                # Simplified naming to avoid sanitized mismatches
                 uniform_name = f"img_{res_idx}" 
-                # Remove explicit binding to let Blender/Driver handle it via shader.image()
-                # BLENDER API UPDATE: GPUShaderCreateInfo.image() automatically adds the uniform declaration.
-                # So we must NOT add it here manually to avoid "redefinition" errors.
-                # lines.append(f"layout({fmt}) uniform {qualifier}image2D {uniform_name};")
+                # GPUShaderCreateInfo.image() handles uniform declaration
                 pass
             
         lines.append("")
+        # Standard uniforms
+        # Use define to construct vector from existing push constants (Vulkan safe)
+        lines.append("#define u_dispatch_size ivec3(u_dispatch_width, u_dispatch_height, u_dispatch_depth)")
         return "\n".join(lines)
 
     def _generate_main(self, compute_pass: ComputePass) -> str:
@@ -104,10 +108,18 @@ class ShaderGenerator:
         
         lines = ["void main() {"]
         for op in compute_pass.ops:
+            # Track required GLSL for tree-shaking
+            self._track_glsl_requirements(op)
             lines.append(self._emit_op(op))
         lines.append("}")
         return "\n".join(lines)
 
+    def _track_glsl_requirements(self, op: Op):
+        """Track which GLSL library bundles are needed for this operation."""
+        if op.opcode in OPCODE_TO_BUNDLE_KEY:
+            bundle_key = OPCODE_TO_BUNDLE_KEY[op.opcode]
+            bundles = get_bundle_requirements(bundle_key)
+            self._required_bundles.update(bundles)
 
     def _param(self, val: Value) -> str:
         """Resolves a value to its GLSL string representation."""
@@ -116,22 +128,17 @@ class ShaderGenerator:
             self._emitted_ids = set()
         
         if val.kind == ValueKind.SSA:
-            # Check if this SSA value has a resource_index (e.g., from Blur output)
-            # If so, use the resource binding name instead of SSA variable
             if val.resource_index is not None:
-                return f"img_{val.resource_index}"  # Use same name as shader binding
+                return f"img_{val.resource_index}"
             return f"v{val.id}"
         elif val.kind == ValueKind.CONSTANT:
-            # If constant already emitted, use its variable
             if val.id in self._emitted_ids:
                 return f"v{val.id}"
-            # Otherwise, emit inline
             if val.origin and hasattr(val.origin, 'attrs'):
                 const_val = val.origin.attrs.get('value')
                 return self._format_constant(const_val, val.type)
-            return f"v{val.id}"  # Fallback
+            return f"v{val.id}"
         elif val.kind == ValueKind.ARGUMENT:
-            # Resource Handle -> Use the uniform name generated in bindings
             return f"img_{val.resource_index}"
         elif val.kind == ValueKind.BUILTIN:
             return val.name_hint
@@ -143,27 +150,23 @@ class ShaderGenerator:
         return format_constant(value, dtype)
 
     def _sanitize_name(self, name: str) -> str:
-        # Replace non-alphanumeric chars with underscore
         import re
         s = re.sub(r'[^a-zA-Z0-9_]', '_', name)
-        # Collapse multiple underscores to avoid reserved identifiers
         s = re.sub(r'_+', '_', s)
-        # Ensure it doesn't start with digit
         if s[0].isdigit():
             s = "_" + s
         return s
 
     def _type_str(self, dtype: DataType) -> str:
-        # Simple mapping
-        name = dtype.name.lower() # vec3, float, ivec2
-        if name == 'uvec2': return 'uvec2' # check casing
+        name = dtype.name.lower()
+        if name == 'uvec2': return 'uvec2'
         return name
 
     def _emit_op(self, op: Op) -> str:
         """Emit GLSL code for an operation using the modular emitter registry."""
         from .emitters import get_emitter
         
-        # Ops that handle their own output declarations (multi-output or special)
+        # Ops that handle their own output declarations
         self_declaring_ops = {OpCode.IMAGE_STORE, OpCode.SEPARATE_XYZ, OpCode.SEPARATE_COLOR}
         
         # Handle Output definition (if SSA)
@@ -179,7 +182,6 @@ class ShaderGenerator:
         dispatch = getattr(self, '_current_pass', None)
         dispatch_size = dispatch.dispatch_size if dispatch else (512, 512, 1)
         
-        # Build set of op IDs in current pass for cross-pass detection
         current_op_ids = set()
         if dispatch and hasattr(dispatch, 'ops'):
             current_op_ids = {id(op) for op in dispatch.ops}
@@ -191,18 +193,19 @@ class ShaderGenerator:
             'graph': self.graph,
             'dispatch_size': dispatch_size,
             'op_ids': current_op_ids,
+            # Pass-specific read/write info for sampler vs image detection
+            'reads_idx': dispatch.reads_idx if dispatch else set(),
+            'writes_idx': dispatch.writes_idx if dispatch else set(),
         }
         
-        # Look up emitter in registry
         emitter = get_emitter(op.opcode)
         
         if emitter is not None:
             result = emitter(op, ctx)
-            # Handle callable (lambda) or string result
             if callable(result):
                 return result
             return result
         
-        # Fallback
         return f"    // Op {op.opcode.name} not implemented"
+
 

@@ -33,9 +33,9 @@ def extract_graph(nodetree) -> Graph:
     # Recursion stack for cycle detection
     recursion_stack: Set[int] = set()
     
-    # Find Output Nodes (Output Image, Output Sequence)
+    # Find Output Nodes (Output Image, Output Sequence, Viewer)
     output_nodes = []
-    output_bl_idnames = {'ComputeNodeOutputImage', 'ComputeNodeOutputSequence'}
+    output_bl_idnames = {'ComputeNodeOutputImage', 'ComputeNodeOutputSequence', 'ComputeNodeViewer'}
     for node in nodetree.nodes:
         if node.bl_idname in output_bl_idnames:
             output_nodes.append(node)
@@ -57,7 +57,13 @@ def extract_graph(nodetree) -> Graph:
         return id(node)
 
     def get_socket_value(socket) -> Value:
-        """Recursively get or compute the value for a socket."""
+        """Recursively get or compute the value for a socket.
+        
+        Auto-Sample Feature:
+        When a Grid (HANDLE) is connected to a socket expecting a Field value
+        (FLOAT, VEC3, VEC4, RGBA), automatically inject a sample operation
+        using normalized UV coordinates.
+        """
         key = get_socket_key(socket)
         if key in socket_value_map:
             return socket_value_map[key]
@@ -73,6 +79,20 @@ def extract_graph(nodetree) -> Graph:
             
             # Recursive call to process dependency
             val = process_node(from_node, from_socket)
+            
+            # === AUTO-SAMPLE: Grid → Field conversion ===
+            # If we got a HANDLE (Grid) but the socket expects a field type,
+            # automatically inject sampling with normalized UVs.
+            if val is not None and val.type == DataType.HANDLE:
+                socket_type = getattr(socket, 'type', None)
+                # Field-expecting sockets: VALUE, VECTOR, RGBA
+                if socket_type in ('VALUE', 'VECTOR', 'RGBA', 'FLOAT'):
+                    # Create normalized UV from gl_GlobalInvocationID
+                    # Uses placeholder that emit_sample will expand inline
+                    uv_placeholder = builder.constant((0.5, 0.5), DataType.VEC2)
+                    val = builder.sample(val, uv_placeholder)
+                    logger.debug(f"Auto-sample injected for {socket.name}")
+            
             socket_value_map[key] = val
             return val
         else:

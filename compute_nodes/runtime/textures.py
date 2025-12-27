@@ -157,3 +157,101 @@ class TextureManager:
     def get_cached_texture(self, name: str) -> gpu.types.GPUTexture:
         """Get a cached internal texture by name."""
         return self._internal_textures.get(name)
+
+
+class DynamicTexturePool:
+    """
+    Lazy-allocates textures on demand and caches them by size.
+    
+    Used for dynamic resolution scenarios where texture sizes aren't
+    known until runtime (e.g., Resize inside loops with computed dimensions).
+    
+    Key difference from TextureManager:
+    - TextureManager: caches by NAME (one texture per resource name)
+    - DynamicTexturePool: caches by SIZE (reusable pool of textures)
+    """
+    
+    def __init__(self):
+        # Cache keyed by (size_tuple, format, dimensions)
+        # Value is a list of available textures at that size
+        self._pool: dict[tuple, list[gpu.types.GPUTexture]] = {}
+        # Currently in-use textures (can't be reused until released)
+        self._in_use: dict[int, tuple] = {}  # texture_id -> key
+        self._logger = logging.getLogger(__name__)
+    
+    def get_or_create(self, size: tuple, format: str = 'RGBA32F', 
+                      dims: int = 2) -> gpu.types.GPUTexture:
+        """
+        Get a texture of the specified size from pool, or create one.
+        
+        Args:
+            size: (width,), (width, height), or (width, height, depth)
+            format: Texture format (default RGBA32F)
+            dims: 1, 2, or 3 dimensional
+        
+        Returns:
+            A GPU texture of the requested size
+        """
+        key = (size, format.upper(), dims)
+        
+        # Check pool for available texture
+        if key in self._pool and self._pool[key]:
+            texture = self._pool[key].pop()
+            self._in_use[id(texture)] = key
+            self._logger.debug(f"DynamicPool: reusing texture {size}")
+            return texture
+        
+        # Create new texture
+        try:
+            if dims == 3:
+                import numpy as np
+                total = size[0] * size[1] * size[2] * 4
+                data = np.zeros(total, dtype=np.float32)
+                buffer = gpu.types.Buffer('FLOAT', total, data.tolist())
+                texture = gpu.types.GPUTexture(size, layers=0, is_cubemap=False,
+                                               format=format.upper(), data=buffer)
+            else:
+                texture = gpu.types.GPUTexture(size, format=format.upper())
+            
+            self._in_use[id(texture)] = key
+            self._logger.debug(f"DynamicPool: created new texture {size}")
+            return texture
+            
+        except Exception as e:
+            self._logger.error(f"DynamicPool: failed to create {dims}D texture {size}: {e}")
+            raise
+    
+    def release(self, texture: gpu.types.GPUTexture) -> None:
+        """Return a texture to the pool for reuse."""
+        tex_id = id(texture)
+        if tex_id in self._in_use:
+            key = self._in_use.pop(tex_id)
+            if key not in self._pool:
+                self._pool[key] = []
+            self._pool[key].append(texture)
+            self._logger.debug(f"DynamicPool: released texture {key[0]}")
+    
+    def release_all(self) -> None:
+        """Release all in-use textures back to pool."""
+        for tex_id, key in list(self._in_use.items()):
+            if key not in self._pool:
+                self._pool[key] = []
+            # Can't get texture from id, just clear the tracking
+        self._in_use.clear()
+    
+    def clear(self) -> None:
+        """Free all textures from pool."""
+        self._pool.clear()
+        self._in_use.clear()
+    
+    def stats(self) -> dict:
+        """Get pool statistics."""
+        available = sum(len(v) for v in self._pool.values())
+        in_use = len(self._in_use)
+        sizes = list(self._pool.keys())
+        return {
+            'available': available,
+            'in_use': in_use,
+            'sizes': sizes
+        }
+

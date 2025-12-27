@@ -21,7 +21,7 @@ class ShaderManager:
         # Cache: hash(key) -> GPUShader
         self._shader_cache = {}
 
-    def get_shader(self, source: str, resources=None, reads_idx=None, writes_idx=None):
+    def get_shader(self, source: str, resources=None, reads_idx=None, writes_idx=None, dispatch_size=None):
         """
         Compile or return a cached compute shader.
         
@@ -30,6 +30,7 @@ class ShaderManager:
             resources (List[ResourceDesc]): List of resources to define interface.
             reads_idx (set): Resource indices that are READ in this pass (use sampler)
             writes_idx (set): Resource indices that are WRITTEN in this pass (use image)
+            dispatch_size (tuple): (w, h, d) dispatch dimensions to determine workgroup size
             
         Returns:
             gpu.types.GPUShader: The compiled shader.
@@ -46,6 +47,11 @@ class ShaderManager:
                 pass_access = "R" if i in reads_set else ""
                 pass_access += "W" if i in writes_set else ""
                 res_sig += f"{i}:{res.name}:{pass_access}:{fmt_sig};"
+        
+        # Include dispatch dimensionality in cache key (affects workgroup size)
+        dispatch_d = dispatch_size[2] if dispatch_size else 1
+        is_3d_dispatch = dispatch_d > 1
+        res_sig += f"dispatch3d:{is_3d_dispatch}"
         
         key = hashlib.sha256((source + res_sig).encode('utf-8')).hexdigest()
         
@@ -111,27 +117,19 @@ class ShaderManager:
                         qualifiers = {'READ', 'WRITE'}
                         shader_info.image(i, fmt, image_type, uniform_name, qualifiers=qualifiers)
             
-            # Detect if any USED resource is 3D to choose appropriate workgroup size
-            has_3d = False
-            if resources:
-                used_indices = reads_set | writes_set
-                for idx in used_indices:
-                    if idx < len(resources):
-                        res = resources[idx]
-                        if isinstance(res, ImageDesc) and getattr(res, 'dimensions', 2) == 3:
-                            has_3d = True
-                            break
-            
             # Push constants for Position normalization
             shader_info.push_constant('INT', 'u_dispatch_width')
             shader_info.push_constant('INT', 'u_dispatch_height')
             shader_info.push_constant('INT', 'u_dispatch_depth')
             
-            # Dynamic local group size based on dimension type
-            # 2D: 16x16x1 (256 threads), 3D: 8x8x8 (512 threads)
-            if has_3d:
+            # Workgroup size based on dispatch dimensions, not resources
+            # This prevents mismatch when sampling 3D from a 2D dispatch
+            dispatch_d = dispatch_size[2] if dispatch_size else 1
+            if dispatch_d > 1:
+                # True 3D dispatch - use 3D workgroups
                 shader_info.local_group_size(8, 8, 8)
             else:
+                # 2D dispatch (even if reading from 3D textures)
                 shader_info.local_group_size(16, 16, 1)
             
             # Add compute source AFTER push constants and local_group_size
@@ -143,11 +141,13 @@ class ShaderManager:
             return shader
             
         except Exception as e:
-            logger.error(f"Shader compile error: {e}")
+            print(f"Shader compile error: {e}")
             # Log source for debugging
+            print("--- SHADER SOURCE ---")
             lines = source.split('\n')
             for i, line in enumerate(lines):
-                logger.debug(f"{i+1:03d}: {line}")
+                print(f"{i+1:03d}: {line}")
+            print("---------------------")
             raise
 
     def clear(self):

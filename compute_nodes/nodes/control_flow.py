@@ -107,32 +107,6 @@ class ComputeNodeMix(ComputeNode):
             self.outputs.remove(self.outputs[0])
             self.outputs.new(socket_type, "Result")
 
-class ComputeNodeRepeatInput(ComputeNode):
-    bl_idname = 'ComputeNodeRepeatInput'
-    bl_label = 'Repeat Zone (Input)'
-    bl_icon = 'LOOP_FORWARDS'
-    
-    def init(self, context):
-        self.inputs.new('NodeSocketInt', "Iterations")
-        
-        # Pairs: Initial (Input) -> Current (Output)
-        self.inputs.new('NodeSocketFloat', "Initial Value")
-        
-        self.outputs.new('NodeSocketInt', "Iteration")
-        self.outputs.new('NodeSocketFloat', "Current Value")
-        
-    def draw_buttons(self, context, layout):
-        layout.label(text="Loop Start")
+# Note: ComputeNodeRepeatInput and ComputeNodeRepeatOutput have been
+# moved to repeat.py with dynamic socket support.
 
-class ComputeNodeRepeatOutput(ComputeNode):
-    bl_idname = 'ComputeNodeRepeatOutput'
-    bl_label = 'Repeat Zone (Output)'
-    bl_icon = 'LOOP_BACK'
-    
-    def init(self, context):
-        # Pairs: Next (Input) -> Final (Output)
-        self.inputs.new('NodeSocketFloat', "Next Value")
-        self.outputs.new('NodeSocketFloat', "Final Result")
-        
-    def draw_buttons(self, context, layout):
-        layout.label(text="Loop End")

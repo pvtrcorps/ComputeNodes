@@ -1,5 +1,10 @@
 # Plan de Diseño Profesional para "ComputeNodes" (Blender 5.0+ Addon)
 
+> [!CAUTION]
+> ## ⚠️ DEPRECATED — See [GEMINI.md](./GEMINI.md)
+> This document is outdated. The authoritative design documentation is now in **GEMINI.md**.
+> This file is kept for historical reference only.
+
 ---
 
 > [!IMPORTANT]

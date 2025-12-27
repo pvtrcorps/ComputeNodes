@@ -1,9 +1,10 @@
-from typing import List, Set
+from typing import List, Set, Union
 from ..ir.graph import Graph, Op, ValueKind
 from ..ir.resources import ImageDesc
 from ..ir.ops import OpCode
 from .passes import ComputePass
 from .analysis import get_topological_sort, find_hazards
+from .loops import PassLoop, find_loop_regions, wrap_passes_in_loops
 
 
 # Ops that are "pure" field operations - no side effects, safe to duplicate
@@ -37,7 +38,7 @@ def collect_field_dependencies(op: Op, collected: Set[int], all_deps: List[Op]):
                 all_deps.append(dep_op)
 
 
-def schedule_passes(graph: Graph) -> List[ComputePass]:
+def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
     """
     Partitions the graph into a list of executable ComputePasses.
     Handles hazard detection (Read-After-Write) by splitting passes.
@@ -109,9 +110,33 @@ def schedule_passes(graph: Graph) -> List[ComputePass]:
             for dep in new_deps:
                 ops_in_pass.add(id(dep))
     
+    # ===== PHASE 2.5: Recalculate reads/writes for all ops in each pass =====
+    # This ensures that ops added during field dependency propagation 
+    # (like SAMPLE from auto-sample) have their resource accesses tracked
+    for p in passes:
+        for op in p.ops:
+            # Track Reads
+            reads = op.reads_resources()
+            for res_idx in reads:
+                res = graph.resources[res_idx]
+                p.reads.add(res)
+                p.reads_idx.add(res_idx)
+            # Track Writes
+            writes = op.writes_resources()
+            for res_idx in writes:
+                res = graph.resources[res_idx]
+                p.writes.add(res)
+                p.writes_idx.add(res_idx)
+    
     # Calculate dispatch_size for each pass based on write resources
     for p in passes:
         _calculate_dispatch_size(p, graph)
+    
+    # ===== PHASE 4: Detect PASS_LOOP regions and wrap in PassLoop =====
+    # Find PASS_LOOP_BEGIN/END pairs and wrap intervening passes
+    loop_regions = find_loop_regions(ops)
+    if loop_regions:
+        passes = wrap_passes_in_loops(passes, loop_regions, ops)
         
     return passes
 

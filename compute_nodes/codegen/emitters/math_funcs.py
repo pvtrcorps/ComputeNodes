@@ -43,8 +43,8 @@ def emit_minmax(func_name, op, ctx):
     lhs = ctx['lhs']
     param = ctx['param']
     
-    if func_name == 'clamp':
-        return f"{lhs}clamp({param(op.inputs[0])}, {param(op.inputs[1])}, {param(op.inputs[2])});"
+    if func_name in ('clamp', 'mix'):
+        return f"{lhs}{func_name}({param(op.inputs[0])}, {param(op.inputs[1])}, {param(op.inputs[2])});"
     else:
         return f"{lhs}{func_name}({param(op.inputs[0])}, {param(op.inputs[1])});"
 
