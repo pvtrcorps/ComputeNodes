@@ -35,7 +35,46 @@ class ComputeSocketBuffer(NodeSocket):
     def draw(self, context, layout, node, text):
         layout.label(text=text)
 
+class ComputeSocketEmpty(NodeSocket):
+    """
+    Invisible/Ghost socket for adding new inputs/outputs dynamically.
+    """
+    bl_idname = 'ComputeSocketEmpty'
+    bl_label = 'New Socket'
+    
+    def draw_color(self, context, node):
+        return (0.4, 0.4, 0.4, 0.4)  # Semi-transparent gray
+
+    def draw(self, context, layout, node, text):
+        layout.label(text="") # No text
 
 # Export for registration
-socket_classes = [ComputeSocketGrid, ComputeSocketBuffer]
+socket_classes = [ComputeSocketGrid, ComputeSocketBuffer, ComputeSocketEmpty]
+
+def map_socket_type(interface_type):
+    """Map Blender interface socket type to our socket types."""
+    # Clean, explicit mapping for scalability
+    SOCKET_MAPPING = {
+        # Standard Blender Types (Fields)
+        'NodeSocketFloat': 'NodeSocketFloat',
+        'NodeSocketInt': 'NodeSocketInt',
+        'NodeSocketBool': 'NodeSocketBool',
+        'NodeSocketVector': 'NodeSocketVector',
+        'NodeSocketColor': 'NodeSocketColor',
+        'NodeSocketString': 'NodeSocketString',
+        'NodeSocketRotation': 'NodeSocketVector', # Map rotation to vector
+        
+        # Custom Types (Grids)
+        'ComputeSocketGrid': 'ComputeSocketGrid',
+        'ComputeSocketBuffer': 'ComputeSocketBuffer',
+        
+        # Internal Repeat Types (if needed)
+        'FLOAT': 'NodeSocketFloat',
+        'VECTOR': 'NodeSocketVector', 
+        'COLOR': 'NodeSocketColor',
+        'GRID': 'ComputeSocketGrid',
+    }
+    
+    # Default to Grid if unknown (or maybe Float?)
+    return SOCKET_MAPPING.get(interface_type, 'ComputeSocketGrid')
 

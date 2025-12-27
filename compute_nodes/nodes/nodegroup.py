@@ -3,7 +3,7 @@
 import bpy
 from bpy.props import PointerProperty, StringProperty, CollectionProperty, BoolProperty, IntProperty
 from .base import ComputeNode
-from ..sockets import ComputeSocketGrid
+from ..sockets import ComputeSocketGrid, map_socket_type
 
 
 # ============================================================================
@@ -127,7 +127,7 @@ class ComputeNodeGroup(ComputeNode):
         # Inputs from Interface Inputs
         for item in interface.items_tree:
             if item.item_type == 'SOCKET':
-                socket_type = self._map_socket_type(item.socket_type)
+                socket_type = map_socket_type(item.socket_type)
                 if item.in_out == 'INPUT':
                     self.inputs.new(socket_type, item.name)
                 elif item.in_out == 'OUTPUT':
@@ -147,15 +147,6 @@ class ComputeNodeGroup(ComputeNode):
                     node = tree.nodes.get(to_node)
                     if node and to_socket in node.inputs:
                         tree.links.new(self.outputs[name], node.inputs[to_socket])
-
-    def _map_socket_type(self, interface_type):
-        """Map Blender interface socket type to our socket types."""
-        # Generic mapping, expanded as needed
-        if 'Vector' in interface_type: return 'NodeSocketVector'
-        if 'Color' in interface_type: return 'NodeSocketColor'
-        if 'Int' in interface_type: return 'NodeSocketInt'
-        if 'Bool' in interface_type: return 'NodeSocketBool'
-        return 'ComputeSocketGrid' # Default to Float/Grid
 
 
 # ============================================================================
@@ -183,53 +174,69 @@ class ComputeNodeGroupInput(ComputeNode):
     
     def sync_from_interface(self):
         """Rebuild outputs from tree.interface inputs."""
+        # Guard against recursive calls (which cause link loss)
+        if getattr(self, '_syncing', False):
+            return
+        
         tree = self.id_data
         if not tree: return
         
-        # We need to preserve the "Empty" socket at the end
-        # And preserve links on existing sockets if possible (by name match)
-        
-        # Current sockets (excluding Empty)
-        current_sockets = [s for s in self.outputs if s.name != "Empty"]
-        
-        # Interface Inputs
-        interface_inputs = [item for item in tree.interface.items_tree 
-                           if item.item_type == 'SOCKET' and item.in_out == 'INPUT']
-        
-        # Naive rebuild: Clear all except Empty? 
-        # Better: Check diff. For MVP, we clear and rebuild but save links.
-        
-        saved_links = {}
-        for sock in self.outputs:
-            if sock.name != "Empty" and sock.is_linked:
-                 saved_links[sock.name] = []
-                 for link in sock.links:
-                     saved_links[sock.name].append((link.to_node.name, link.to_socket.name))
-        
-        self.outputs.clear()
-        
-        for item in interface_inputs:
-            # Our mapping: Interface INPUT -> Node OUTPUT
-            # socket_type mapping might need refinement
-            stype = 'NodeSocketFloat' # Default
-            if 'Vector' in item.socket_type: stype = 'NodeSocketVector'
+        self._syncing = True
+        try:
+            # We need to preserve the "Empty" socket at the end
+            # And preserve links on existing sockets if possible (by name match)
             
-            sock = self.outputs.new(stype, item.name)
+            # Current sockets (excluding Empty)
+            current_sockets = [s for s in self.outputs if s.name != "Empty"]
             
-            # Restore links
-            if item.name in saved_links:
-                for to_node, to_socket in saved_links[item.name]:
-                     node = tree.nodes.get(to_node)
-                     if node and to_socket in node.inputs:
-                         tree.links.new(sock, node.inputs[to_socket])
-                         
-        self._ensure_empty_socket()
+            # IMPORTANT: Cache interface data as tuples BEFORE modifying sockets
+            # Blender's interface items can return stale data when accessed during socket modifications
+            interface_inputs = [(item.name, item.socket_type) for item in tree.interface.items_tree 
+                               if item.item_type == 'SOCKET' and item.in_out == 'INPUT']
+            
+            # Save links
+            saved_links = {}
+            for sock in self.outputs:
+                if sock.name != "Empty" and sock.is_linked:
+                     saved_links[sock.name] = []
+                     for link in sock.links:
+                         saved_links[sock.name].append((link.to_node.name, link.to_socket.identifier))
+            
+            self.outputs.clear()
+        
+            for item_name, item_socket_type in interface_inputs:
+                # Our mapping: Interface INPUT -> Node OUTPUT
+                # Use shared mapping function
+                stype = map_socket_type(item_socket_type)
+                self.outputs.new(stype, item_name)
+            
+            self._ensure_empty_socket()
+            
+            # IMPORTANT: Restore links AFTER all sockets are created
+            # During creation, socket references can be unstable in Blender
+            for item_name, _ in interface_inputs:
+                if item_name in saved_links:
+                    # Find the socket by name AFTER all sockets exist
+                    sock = self.outputs.get(item_name)
+                    if sock:
+                        for to_node, to_socket in saved_links[item_name]:
+                             node = tree.nodes.get(to_node)
+                             if node:
+                                 target_sock = next((s for s in node.inputs if s.identifier == to_socket), None)
+                                 if target_sock:
+                                     tree.links.new(sock, target_sock)
+        finally:
+            self._syncing = False
 
     def _ensure_empty_socket(self):
-        if not self.outputs or self.outputs[-1].name != "Empty":
-            self.outputs.new('NodeSocketFloat', "Empty")
+        if not self.outputs or self.outputs[-1].bl_idname != "ComputeSocketEmpty":
+            self.outputs.new('ComputeSocketEmpty', "Empty")
     
     def draw_socket(self, context, layout, socket, text):
+        if socket.bl_idname == 'ComputeSocketEmpty':
+            layout.label(text="")
+            return
+            
         row = layout.row(align=True)
         if socket.name != "Empty":
             # Delete via Interface API (custom operator wrapper)
@@ -242,7 +249,6 @@ class ComputeNodeGroupInput(ComputeNode):
         """Called when links change. Handle dynamic socket creation."""
         self._handle_dynamic_sockets()
         
-
     def _handle_dynamic_sockets(self):
         """If Empty linked -> Add to Interface."""
         if not self.outputs: return
@@ -258,7 +264,15 @@ class ComputeNodeGroupInput(ComputeNode):
             
             # Determine type
             stype = 'NodeSocketFloat'
-            if to_socket and 'Vector' in to_socket.bl_idname: stype = 'NodeSocketVector'
+            if to_socket:
+                t = to_socket.bl_idname
+                if 'Vector' in t: stype = 'NodeSocketVector'
+                elif 'Color' in t: stype = 'NodeSocketColor'
+                elif 'Bool' in t: stype = 'NodeSocketBool'
+                elif 'Int' in t: stype = 'NodeSocketInt'
+                elif 'String' in t: stype = 'NodeSocketString'
+                elif 'Grid' in t: stype = 'ComputeSocketGrid'
+                elif 'Buffer' in t: stype = 'ComputeSocketBuffer'
             
             item = interface.new_socket(f"Input {new_idx}", in_out='INPUT', socket_type=stype)
             
@@ -278,7 +292,7 @@ class ComputeNodeGroupInput(ComputeNode):
 # ============================================================================
 # GROUP OUTPUT NODE
 # ============================================================================
-
+    
 class ComputeNodeGroupOutput(ComputeNode):
     """
     Group Output - Exposes outputs inside a group.
@@ -301,40 +315,60 @@ class ComputeNodeGroupOutput(ComputeNode):
         return self.bl_label
         
     def sync_from_interface(self):
+        # Guard against recursive calls
+        if getattr(self, '_syncing', False):
+            return
+            
         tree = self.id_data
         if not tree: return
         
-        # Save links
-        saved_links = {}
-        for sock in self.inputs:
-            if sock.name != "Empty" and sock.is_linked:
-                 link = sock.links[0]
-                 saved_links[sock.name] = (link.from_node.name, link.from_socket.name)
-
-        self.inputs.clear()
-        
-        interface_outputs = [item for item in tree.interface.items_tree 
-                           if item.item_type == 'SOCKET' and item.in_out == 'OUTPUT']
-        
-        for item in interface_outputs:
-            stype = 'NodeSocketFloat'
-            if 'Vector' in item.socket_type: stype = 'NodeSocketVector'
+        self._syncing = True
+        try:
+            # IMPORTANT: Cache interface data as tuples BEFORE modifying sockets
+            # Blender's interface items can return stale data when accessed during socket modifications
+            interface_outputs = [(item.name, item.socket_type) for item in tree.interface.items_tree 
+                               if item.item_type == 'SOCKET' and item.in_out == 'OUTPUT']
             
-            sock = self.inputs.new(stype, item.name)
-            
-            if item.name in saved_links:
-                from_node, from_socket = saved_links[item.name]
-                node = tree.nodes.get(from_node)
-                if node and from_socket in node.outputs:
-                    tree.links.new(node.outputs[from_socket], sock)
+            # Save links using identifier
+            saved_links = {}
+            for sock in self.inputs:
+                if sock.name != "Empty" and sock.is_linked:
+                     link = sock.links[0]
+                     saved_links[sock.name] = (link.from_node.name, link.from_socket.identifier)
 
-        self._ensure_empty_socket()
+            self.inputs.clear()
+            
+            for item_name, item_socket_type in interface_outputs:
+                # Use shared mapping function
+                stype = map_socket_type(item_socket_type)
+                self.inputs.new(stype, item_name)
+            
+            self._ensure_empty_socket()
+            
+            # IMPORTANT: Restore links AFTER all sockets are created
+            # During creation, socket references can be unstable in Blender
+            for item_name, _ in interface_outputs:
+                if item_name in saved_links:
+                    sock = self.inputs.get(item_name)
+                    if sock:
+                        from_node, from_socket = saved_links[item_name]
+                        node = tree.nodes.get(from_node)
+                        if node:
+                            source_sock = next((s for s in node.outputs if s.identifier == from_socket), None)
+                            if source_sock:
+                                tree.links.new(source_sock, sock)
+        finally:
+            self._syncing = False
         
     def _ensure_empty_socket(self):
-        if not self.inputs or self.inputs[-1].name != "Empty":
-            self.inputs.new('NodeSocketFloat', "Empty")
+        if not self.inputs or self.inputs[-1].bl_idname != "ComputeSocketEmpty":
+            self.inputs.new('ComputeSocketEmpty', "Empty")
 
     def draw_socket(self, context, layout, socket, text):
+        if socket.bl_idname == 'ComputeSocketEmpty':
+            layout.label(text="")
+            return
+
         row = layout.row(align=True)
         if socket.name != "Empty":
             op = row.operator("compute.remove_group_socket_interface", text="", icon="X", emboss=False)
@@ -357,7 +391,15 @@ class ComputeNodeGroupOutput(ComputeNode):
             new_idx = len(interface.items_tree)
             
             stype = 'NodeSocketFloat'
-            if from_socket and 'Vector' in from_socket.bl_idname: stype = 'NodeSocketVector'
+            if from_socket:
+                t = from_socket.bl_idname
+                if 'Vector' in t: stype = 'NodeSocketVector'
+                elif 'Color' in t: stype = 'NodeSocketColor'
+                elif 'Bool' in t: stype = 'NodeSocketBool'
+                elif 'Int' in t: stype = 'NodeSocketInt'
+                elif 'String' in t: stype = 'NodeSocketString'
+                elif 'Grid' in t: stype = 'ComputeSocketGrid'
+                elif 'Buffer' in t: stype = 'ComputeSocketBuffer'
             
             item = interface.new_socket(f"Output {new_idx}", in_out='OUTPUT', socket_type=stype)
             
@@ -370,6 +412,8 @@ class ComputeNodeGroupOutput(ComputeNode):
             
             # Update parent groups
             update_parent_groups(self.id_data)
+
+
 
 
 

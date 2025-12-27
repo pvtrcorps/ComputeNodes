@@ -88,7 +88,7 @@ class ComputeNodeWhiteNoise(ComputeNode):
         self.update_sockets(context)
         
     def draw_buttons(self, context, layout):
-        layout.prop(self, "dim_mode", text="")
+        layout.prop(self, "dimensions", text="")
         
 
     def draw_label(self):

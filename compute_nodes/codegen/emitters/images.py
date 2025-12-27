@@ -120,25 +120,38 @@ def emit_image_load(op, ctx):
 
 
 def emit_image_size(op, ctx):
-    """Emit imageSize operation."""
+    """Emit imageSize operation - returns ivec3 for both 2D and 3D grids."""
     lhs = ctx['lhs']
     param = ctx['param']
     graph = ctx['graph']
     
     img = param(op.inputs[0])
     
+    # Detect resource dimensionality
+    res_idx = op.inputs[0].resource_index
+    is_3d = False
+    if res_idx is not None and res_idx < len(graph.resources):
+        res = graph.resources[res_idx]
+        is_3d = getattr(res, 'dimensions', 2) == 3
+    
     # Check if sampler or image binding
     writes_idx = ctx.get('writes_idx', set())
-    res_idx = op.inputs[0].resource_index
     
     if res_idx is not None:
         # If not written, it's a sampler
         if res_idx not in writes_idx:
-            return f"{lhs}textureSize({img}, 0);"
+            if is_3d:
+                return f"{lhs}ivec3(textureSize({img}, 0));"
+            else:
+                # 2D sampler: extend to ivec3 with depth=1
+                return f"{lhs}ivec3(textureSize({img}, 0), 1);"
     
-    return f"{lhs}imageSize({img});"
-    
-    return f"{lhs}imageSize({img});"
+    # Image binding
+    if is_3d:
+        return f"{lhs}ivec3(imageSize({img}));"
+    else:
+        # 2D image: extend to ivec3 with depth=1
+        return f"{lhs}ivec3(imageSize({img}), 1);"
 
 
 def emit_sample(op, ctx):

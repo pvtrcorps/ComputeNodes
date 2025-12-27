@@ -50,23 +50,49 @@ def handle_image_write(node, ctx):
 
 
 def handle_image_info(node, ctx):
-    """Handle ComputeNodeImageInfo node."""
+    """Handle ComputeNodeImageInfo node - returns separate width, height, depth, and dimensionality."""
     builder = ctx['builder']
     socket_value_map = ctx['socket_value_map']
     get_socket_key = ctx['get_socket_key']
     get_socket_value = ctx['get_socket_value']
     
     val_img = get_socket_value(node.inputs[0])
+    
     if not val_img:
-        val_size = builder.constant((0, 0), DataType.IVEC2)
+        # No input: return zeros
+        val_width = builder.constant(0, DataType.INT)
+        val_height = builder.constant(0, DataType.INT)
+        val_depth = builder.constant(1, DataType.INT)  # Default to 1 for depth
+        val_dims = builder.constant(2, DataType.INT)   # Default to 2D
     else:
         if val_img.type != DataType.HANDLE:
-            raise TypeError(f"Node '{node.name}': Input must be an Image (got {val_img.type.name})")
+            raise TypeError(f"Node '{node.name}': Input must be a Grid (got {val_img.type.name})")
+        
+        # Get image size as IVEC3 (handles both 2D and 3D)
         val_size = builder.image_size(val_img)
+        
+        # Extract individual components
+        val_width = builder.swizzle(val_size, "x")
+        val_height = builder.swizzle(val_size, "y")
+        val_depth = builder.swizzle(val_size, "z")
+        
+        # Determine dimensionality from resource descriptor
+        graph = builder.graph
+        if val_img.resource_index is not None and val_img.resource_index < len(graph.resources):
+            res = graph.resources[val_img.resource_index]
+            dimensions = getattr(res, 'dimensions', 2)
+            val_dims = builder.constant(dimensions, DataType.INT)
+        else:
+            # Default to 2D if resource not found
+            val_dims = builder.constant(2, DataType.INT)
     
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val_size
-    return val_size
+    # Map outputs: Width, Height, Depth, Dimensionality
+    socket_value_map[get_socket_key(node.outputs[0])] = val_width
+    socket_value_map[get_socket_key(node.outputs[1])] = val_height
+    socket_value_map[get_socket_key(node.outputs[2])] = val_depth
+    socket_value_map[get_socket_key(node.outputs[3])] = val_dims
+    
+    return val_width
 
 
 def handle_sample(node, ctx):

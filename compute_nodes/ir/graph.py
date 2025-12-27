@@ -235,9 +235,10 @@ class IRBuilder:
 
     def image_size(self, image: Value) -> Value:
         op = self.add_op(OpCode.IMAGE_SIZE, [image])
-        # imageSize returns ivec2 for 2D images (or ivec3 for 3D/Arrays)
-        # MVP: assuming 2D
-        v = self._new_value(ValueKind.SSA, DataType.IVEC2, origin=op)
+        # imageSize returns ivec3 for consistent handling of 2D and 3D images
+        # For 2D: returns (width, height, 1)
+        # For 3D: returns (width, height, depth)
+        v = self._new_value(ValueKind.SSA, DataType.IVEC3, origin=op)
         op.add_output(v)
         return v
     

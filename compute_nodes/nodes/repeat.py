@@ -15,7 +15,7 @@ from bpy.props import (
     PointerProperty,
 )
 from ..nodetree import ComputeNode
-from ..sockets import ComputeSocketGrid
+from ..sockets import ComputeSocketGrid, ComputeSocketEmpty
 
 
 # =============================================================================
@@ -34,35 +34,18 @@ class ComputeRepeatItem(bpy.types.PropertyGroup):
     socket_type: EnumProperty(
         name="Type",
         items=[
-            ('FLOAT', "Float", "Scalar value"),
-            ('VECTOR', "Vector", "3D vector"),
-            ('COLOR', "Color", "RGBA color"),
-            ('GRID', "Grid", "GPU texture buffer"),
+            ('NodeSocketFloat', "Float", "Scalar value"),
+            ('NodeSocketVector', "Vector", "3D vector"),
+            ('NodeSocketColor', "Color", "RGBA color"),
+            ('ComputeSocketGrid', "Grid", "GPU texture buffer"),
         ],
-        default='FLOAT',
+        default='NodeSocketFloat',
         description="Data type for this state"
     )
 
-
-# Socket type mapping
-SOCKET_TYPE_MAP = {
-    'FLOAT': 'NodeSocketFloat',
-    'VECTOR': 'NodeSocketVector', 
-    'COLOR': 'NodeSocketColor',
-    'GRID': 'ComputeSocketGrid',
-}
-
-# Reverse mapping for type inference
-SOCKET_TO_REPEAT_TYPE = {
-    'NodeSocketFloat': 'FLOAT',
-    'NodeSocketVector': 'VECTOR',
-    'NodeSocketColor': 'COLOR',
-    'ComputeSocketGrid': 'GRID',
-    # Handle common alternatives
-    'NodeSocketInt': 'FLOAT',  # Treat as float for now
-    'NodeSocketBool': 'FLOAT',
-}
-
+# =============================================================================
+# Repeat Input Node
+# =============================================================================
 
 # =============================================================================
 # Repeat Input Node
@@ -107,28 +90,27 @@ class ComputeNodeRepeatInput(ComputeNode):
         self.outputs.new('NodeSocketInt', "Iteration")
         
         # Extension socket (blank, for drag-to-add) - added last
-        self._add_extension_socket()
+        self._ensure_extension_socket()
     
-    # Special name for extension socket (must be unique)
-    EXTENSION_SOCKET_NAME = "···"
-    
-    def _add_extension_socket(self):
+    def _ensure_extension_socket(self):
         """Add the special extension socket for drag-to-add pattern."""
-        # Check if already exists
-        if self.EXTENSION_SOCKET_NAME in self.inputs:
+        if not self.inputs or self.inputs[-1].bl_idname != 'ComputeSocketEmpty':
+            self.inputs.new('ComputeSocketEmpty', "Empty")
+            
+    def draw_socket(self, context, layout, socket, text):
+        if socket.bl_idname == 'ComputeSocketEmpty':
+            layout.label(text="")
             return
-        
-        ext = self.inputs.new('NodeSocketFloat', self.EXTENSION_SOCKET_NAME)
-        ext.hide_value = True
+        layout.label(text=text)
     
     def _is_extension_socket(self, socket):
         """Check if socket is the extension socket."""
-        return socket.name == self.EXTENSION_SOCKET_NAME
+        return socket.bl_idname == 'ComputeSocketEmpty'
     
     def _get_extension_socket(self):
         """Find the extension socket."""
-        if self.EXTENSION_SOCKET_NAME in self.inputs:
-            return self.inputs[self.EXTENSION_SOCKET_NAME]
+        if self.inputs and self.inputs[-1].bl_idname == 'ComputeSocketEmpty':
+            return self.inputs[-1]
         return None
     
     def update(self):
@@ -141,8 +123,15 @@ class ComputeNodeRepeatInput(ComputeNode):
             from_socket = link.from_socket
             
             # Infer type
-            socket_type = from_socket.bl_idname
-            repeat_type = SOCKET_TO_REPEAT_TYPE.get(socket_type, 'FLOAT')
+            socket_type = 'NodeSocketFloat'
+            t = from_socket.bl_idname
+            if 'Vector' in t: socket_type = 'NodeSocketVector'
+            elif 'Color' in t: socket_type = 'NodeSocketColor'
+            elif 'Grid' in t: socket_type = 'ComputeSocketGrid'
+            elif 'Buffer' in t: socket_type = 'ComputeSocketBuffer'
+            
+            repeat_type = socket_type
+
             
             # Store the from_node and from_socket for reconnection
             from_node = link.from_node
@@ -171,68 +160,76 @@ class ComputeNodeRepeatInput(ComputeNode):
     
     def _sync_sockets(self):
         """Rebuild sockets to match repeat_items collection."""
-        # Keep track of existing connections to restore
-        connections = {}
-        for socket in self.inputs:
-            if socket.is_linked and not self._is_extension_socket(socket):
-                for link in socket.links:
-                    connections[socket.name] = (link.from_node.name, link.from_socket.name)
+        # Guard against recursive calls (links.new can trigger updates)
+        if getattr(self, '_syncing', False):
+            return
         
-        for socket in self.outputs:
-            if socket.is_linked and socket.name != "Iteration":
-                for link in socket.links:
-                    connections[socket.name] = (link.to_node.name, link.to_socket.name)
-        
-        # Clear dynamic sockets (keep Iterations input and Iteration output)
-        # Remove from end to avoid index issues
-        while len(self.inputs) > 1:
-            socket = self.inputs[-1]
-            if socket.name == "Iterations":
-                break
-            self.inputs.remove(socket)
-        
-        while len(self.outputs) > 1:
-            socket = self.outputs[-1]
-            if socket.name == "Iteration":
-                break
-            self.outputs.remove(socket)
-        
-        # Add sockets for each repeat item
-        for item in self.repeat_items:
-            socket_type = SOCKET_TYPE_MAP.get(item.socket_type, 'NodeSocketFloat')
+        self._syncing = True
+        try:
+            # Keep track of existing connections to restore
+            connections = {}
+            for socket in self.inputs:
+                if socket.is_linked and not self._is_extension_socket(socket):
+                    for link in socket.links:
+                        connections[socket.name] = (link.from_node.name, link.from_socket.name)
             
-            # Input: Initial value
-            input_name = f"Initial: {item.name}"
-            self.inputs.new(socket_type, input_name)
+            for socket in self.outputs:
+                if socket.is_linked and socket.name != "Iteration":
+                    for link in socket.links:
+                        connections[socket.name] = (link.to_node.name, link.to_socket.name)
             
-            # Output: Current value (for use inside loop)
-            output_name = f"Current: {item.name}"
-            self.outputs.new(socket_type, output_name)
-        
-        # Re-add extension socket
-        self._add_extension_socket()
-        
-        # Restore connections where possible
-        tree = self.id_data
-        for socket_name, (node_name, other_socket_name) in connections.items():
-            if socket_name in self.inputs:
-                # Input connection: from other node to this
-                if node_name in tree.nodes:
-                    other_node = tree.nodes[node_name]
-                    if other_socket_name in other_node.outputs:
-                        tree.links.new(
-                            other_node.outputs[other_socket_name],
-                            self.inputs[socket_name]
-                        )
-            elif socket_name in self.outputs:
-                # Output connection: from this to other node
-                if node_name in tree.nodes:
-                    other_node = tree.nodes[node_name]
-                    if other_socket_name in other_node.inputs:
-                        tree.links.new(
-                            self.outputs[socket_name],
-                            other_node.inputs[other_socket_name]
-                        )
+            # Clear dynamic sockets (keep Iterations input and Iteration output)
+            # Remove from end to avoid index issues
+            while len(self.inputs) > 1:
+                socket = self.inputs[-1]
+                if socket.name == "Iterations":
+                    break
+                self.inputs.remove(socket)
+            
+            while len(self.outputs) > 1:
+                socket = self.outputs[-1]
+                if socket.name == "Iteration":
+                    break
+                self.outputs.remove(socket)
+            
+            # Add sockets for each repeat item (create all first)
+            for item in self.repeat_items:
+                socket_type = item.socket_type
+                
+                # Input: Initial value
+                input_name = f"Initial: {item.name}"
+                self.inputs.new(socket_type, input_name)
+                
+                # Output: Current value (for use inside loop)
+                output_name = f"Current: {item.name}"
+                self.outputs.new(socket_type, output_name)
+            
+            # Re-add extension socket
+            self._ensure_extension_socket()
+            
+            # Restore connections AFTER all sockets are created
+            tree = self.id_data
+            for socket_name, (node_name, other_socket_name) in connections.items():
+                if socket_name in self.inputs:
+                    # Input connection: from other node to this
+                    if node_name in tree.nodes:
+                        other_node = tree.nodes[node_name]
+                        if other_socket_name in other_node.outputs:
+                            tree.links.new(
+                                other_node.outputs[other_socket_name],
+                                self.inputs[socket_name]
+                            )
+                elif socket_name in self.outputs:
+                    # Output connection: from this to other node
+                    if node_name in tree.nodes:
+                        other_node = tree.nodes[node_name]
+                        if other_socket_name in other_node.inputs:
+                            tree.links.new(
+                                self.outputs[socket_name],
+                                other_node.inputs[other_socket_name]
+                            )
+        finally:
+            self._syncing = False
     
     def _sync_paired_output(self):
         """Synchronize state items to paired Repeat Output."""
@@ -265,7 +262,7 @@ class ComputeNodeRepeatInput(ComputeNode):
         else:
             col.label(text=f"{len(self.repeat_items)} state(s)")
     
-    def add_state(self, name="State", socket_type='FLOAT'):
+    def add_state(self, name="State", socket_type='NodeSocketFloat'):
         """Add a new state variable (called from operator)."""
         item = self.repeat_items.add()
         item.name = name
@@ -314,33 +311,41 @@ class ComputeNodeRepeatOutput(ComputeNode):
     
     def _sync_sockets(self):
         """Rebuild sockets to match repeat_items collection from paired input."""
-        # Clear all sockets
-        self.inputs.clear()
-        self.outputs.clear()
-        
-        # Get repeat_items from paired input
-        if not self.paired_input:
+        # Guard against recursive calls
+        if getattr(self, '_syncing', False):
             return
         
-        node_tree = self.id_data
-        if not node_tree:
-            return
-        
-        paired = node_tree.nodes.get(self.paired_input)
-        if not paired or not hasattr(paired, 'repeat_items'):
-            return
-        
-        # Add sockets for each repeat item from paired input
-        for item in paired.repeat_items:
-            socket_type = SOCKET_TYPE_MAP.get(item.socket_type, 'NodeSocketFloat')
+        self._syncing = True
+        try:
+            # Clear all sockets
+            self.inputs.clear()
+            self.outputs.clear()
             
-            # Input: Next value (computed inside loop)
-            input_name = f"Next: {item.name}"
-            self.inputs.new(socket_type, input_name)
+            # Get repeat_items from paired input
+            if not self.paired_input:
+                return
             
-            # Output: Final value (after all iterations)
-            output_name = f"Final: {item.name}"
-            self.outputs.new(socket_type, output_name)
+            node_tree = self.id_data
+            if not node_tree:
+                return
+            
+            paired = node_tree.nodes.get(self.paired_input)
+            if not paired or not hasattr(paired, 'repeat_items'):
+                return
+            
+            # Add sockets for each repeat item from paired input
+            for item in paired.repeat_items:
+                socket_type = item.socket_type
+                
+                # Input: Next value (computed inside loop)
+                input_name = f"Next: {item.name}"
+                self.inputs.new(socket_type, input_name)
+                
+                # Output: Final value (after all iterations)
+                output_name = f"Final: {item.name}"
+                self.outputs.new(socket_type, output_name)
+        finally:
+            self._syncing = False
     
     def draw_buttons(self, context, layout):
         """Draw node body."""
@@ -363,12 +368,12 @@ class COMPUTE_OT_add_repeat_state(bpy.types.Operator):
     socket_type: EnumProperty(
         name="Type",
         items=[
-            ('FLOAT', "Float", ""),
-            ('VECTOR', "Vector", ""),
-            ('COLOR', "Color", ""),
-            ('GRID', "Grid", ""),
+            ('NodeSocketFloat', "Float", ""),
+            ('NodeSocketVector', "Vector", ""),
+            ('NodeSocketColor', "Color", ""),
+            ('ComputeSocketGrid', "Grid", ""),
         ],
-        default='FLOAT'
+        default='NodeSocketFloat'
     )
     
     @classmethod
@@ -441,16 +446,64 @@ class COMPUTE_OT_pair_repeat_nodes(bpy.types.Operator):
         self.report({'INFO'}, f"Paired {input_node.name} with {output_node.name}")
         return {'FINISHED'}
 
+class COMPUTE_OT_add_repeat_zone_pair(bpy.types.Operator):
+    """Add a Repeat Input and Output pair, linked and paired automatically."""
+    bl_idname = "compute.add_repeat_zone_pair"
+    bl_label = "Repeat Zone"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        tree = context.space_data.node_tree
+        if not tree: return {'CANCELLED'}
+        
+        # Create Input
+        input_node = tree.nodes.new('ComputeNodeRepeatInput')
+        input_node.location = context.space_data.cursor_location
+        input_node.select = True
+        tree.nodes.active = input_node
+        
+        # Create Output
+        output_node = tree.nodes.new('ComputeNodeRepeatOutput')
+        output_node.location = (input_node.location.x + 300, input_node.location.y)
+        output_node.select = True
+        
+        # Link Iterations
+        # Logic: We might want a default loop. But for now just pairing them is enough.
+        
+        # Pair them
+        input_node.paired_output = output_node.name
+        output_node.paired_input = input_node.name
+        
+        # Sync
+        input_node._sync_paired_output()
+        
+        return {'FINISHED'}
 
 # =============================================================================
 # Sidebar Panel
 # =============================================================================
 
+class COMPUTE_UL_repeat_items(bpy.types.UIList):
+    """Custom UI List for Repeat States"""
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        # Determine icon based on type
+        t = item.socket_type
+        icn = 'DOT'
+        if 'Vector' in t: icn = 'Gm'
+        elif 'Color' in t: icn = 'COLOR'
+        elif 'Float' in t: icn = 'HOME'
+        elif 'Grid' in t: icn = 'RENDERLAYERS'
+        elif 'Buffer' in t: icn = 'BUFFER'
+        
+        layout.label(text="", icon=icn)
+        layout.prop(item, "name", text="", emboss=False)
+
+
 class COMPUTE_PT_repeat_zone(bpy.types.Panel):
     """Sidebar panel for managing Repeat Zone states."""
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
-    bl_category = 'Compute'
+    bl_category = 'Item' # Show in the "Node" tab (context sensitive)
     bl_label = "Repeat Zone"
     
     @classmethod
@@ -470,7 +523,7 @@ class COMPUTE_PT_repeat_zone(bpy.types.Panel):
         layout = self.layout
         node = context.active_node
         
-        # Get the RepeatInput (navigate from output if needed)
+        # Get the RepeatInput
         if node.bl_idname == 'ComputeNodeRepeatOutput':
             if node.paired_input and node.paired_input in context.space_data.edit_tree.nodes:
                 repeat_input = context.space_data.edit_tree.nodes[node.paired_input]
@@ -480,40 +533,31 @@ class COMPUTE_PT_repeat_zone(bpy.types.Panel):
         else:
             repeat_input = node
         
-        # Pairing section
-        box = layout.box()
-        box.label(text="Pairing", icon='LINKED')
-        if repeat_input.paired_output:
-            box.label(text=f"Output: {repeat_input.paired_output}")
-        else:
-            box.label(text="No output paired", icon='INFO')
-            box.operator("compute.pair_repeat_nodes", text="Pair Selected Nodes")
-        
-        layout.separator()
-        
-        # State variables section
-        box = layout.box()
-        box.label(text="State Variables", icon='PROPERTIES')
-        
-        if len(repeat_input.repeat_items) == 0:
-            box.label(text="No states defined")
-            box.label(text="Drag a link to extension socket")
-        else:
-            for i, item in enumerate(repeat_input.repeat_items):
-                row = box.row(align=True)
-                row.prop(item, "name", text="")
-                row.prop(item, "socket_type", text="")
-                op = row.operator("compute.remove_repeat_state", text="", icon='X')
-                op.index = i
-        
-        # Add button with type selector
-        row = box.row(align=True)
-        row.operator_menu_enum(
-            "compute.add_repeat_state",
-            "socket_type",
-            text="Add State",
-            icon='ADD'
+        # Main List
+        row = layout.row()
+        row.template_list(
+            "COMPUTE_UL_repeat_items", "",
+            repeat_input, "repeat_items",
+            repeat_input, "active_index",
+            rows=5
         )
+        
+        col = row.column(align=True)
+        col.operator_menu_enum("compute.add_repeat_state", "socket_type", text="", icon='ADD')
+        
+        # Remove active
+        if repeat_input.repeat_items:
+             op = col.operator("compute.remove_repeat_state", text="", icon='X')
+             op.index = repeat_input.active_index
+             
+        # Properties of Active Item
+        if repeat_input.repeat_items and repeat_input.active_index < len(repeat_input.repeat_items):
+            item = repeat_input.repeat_items[repeat_input.active_index]
+            
+            box = layout.box()
+            box.label(text="Item Properties", icon='PREFERENCES')
+            box.prop(item, "name")
+            box.prop(item, "socket_type")
 
 
 # =============================================================================
@@ -526,6 +570,8 @@ _local_classes = [
     COMPUTE_OT_add_repeat_state,
     COMPUTE_OT_remove_repeat_state,
     COMPUTE_OT_pair_repeat_nodes,
+    COMPUTE_OT_add_repeat_zone_pair,
+    COMPUTE_UL_repeat_items,
     COMPUTE_PT_repeat_zone,
 ]
 

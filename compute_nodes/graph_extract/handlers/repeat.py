@@ -76,7 +76,8 @@ def handle_repeat_output(node, ctx):
             val_initial = get_socket_value(repeat_input.inputs[initial_socket_name])
         
         # Determine data type
-        is_grid = item.socket_type == 'GRID'
+        # socket_type uses Blender socket bl_idnames (e.g. 'ComputeSocketGrid', 'NodeSocketFloat')
+        is_grid = item.socket_type == 'ComputeSocketGrid'
         data_type = DataType.HANDLE if is_grid else _socket_type_to_datatype(item.socket_type)
         
         state = {
@@ -330,11 +331,16 @@ def _search_upstream_repeat_input(start_node) -> Optional[Any]:
 
 
 def _socket_type_to_datatype(socket_type: str) -> DataType:
-    """Convert repeat item socket_type to DataType."""
+    """Convert repeat item socket_type to DataType.
+    
+    socket_type uses Blender socket bl_idnames, not short names.
+    """
     mapping = {
-        'FLOAT': DataType.FLOAT,
-        'VECTOR': DataType.VEC3,
-        'COLOR': DataType.VEC4,
-        'GRID': DataType.HANDLE,
+        # Blender socket bl_idnames
+        'NodeSocketFloat': DataType.FLOAT,
+        'NodeSocketVector': DataType.VEC3,
+        'NodeSocketColor': DataType.VEC4,
+        'ComputeSocketGrid': DataType.HANDLE,
+        'NodeSocketInt': DataType.INT,
     }
     return mapping.get(socket_type, DataType.FLOAT)

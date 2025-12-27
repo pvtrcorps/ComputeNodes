@@ -142,12 +142,6 @@ def handle_vector_math(node, ctx):
     elif opcode == OpCode.REFLECT:
         res_type = DataType.VEC3
     
-    # Reset inputs for unary
-    if opcode in {OpCode.LENGTH, OpCode.NORMALIZE}:
-        inputs = [val_a]
-    else:
-        inputs = [val_a, val_b]
-        
     # Create Op
     op = builder.add_op(opcode, inputs)
     val_res = builder._new_value(ValueKind.SSA, res_type, origin=op)

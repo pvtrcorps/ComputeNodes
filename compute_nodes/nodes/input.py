@@ -48,7 +48,7 @@ class ComputeNodeImageWrite(ComputeNode):
 
 
 class ComputeNodeImageInfo(ComputeNode):
-    """Get information about a Grid (size, etc)."""
+    """Get information about a Grid (dimensions, size)."""
     bl_idname = 'ComputeNodeImageInfo'
     bl_label = 'Grid Info'
     node_category = "INPUT"
@@ -57,7 +57,11 @@ class ComputeNodeImageInfo(ComputeNode):
         self.apply_node_color()
         # Input: Grid handle (cyan)
         self.inputs.new('ComputeSocketGrid', "Grid")
-        self.outputs.new('NodeSocketVector', "Size")  # vec2 (w, h)
+        # Outputs: Separate integers for each dimension and dimensionality
+        self.outputs.new('NodeSocketInt', "Width")
+        self.outputs.new('NodeSocketInt', "Height")
+        self.outputs.new('NodeSocketInt', "Depth")  # Returns 1 for 2D grids
+        self.outputs.new('NodeSocketInt', "Dimensionality")  # 1, 2, or 3
         
     def draw_label(self):
         self._draw_node_color()

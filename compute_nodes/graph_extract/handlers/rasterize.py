@@ -16,35 +16,84 @@ def handle_capture(node, ctx):
     into concrete data that can be sampled at arbitrary coordinates.
     
     Grid Architecture:
-    - Grid2D: width x height (dimensions == '2D')
-    - Grid3D: width x height x depth (dimensions == '3D')
+    - Grid2D: width x height (dim_mode == '2D')
+    - Grid3D: width x height x depth (dim_mode == '3D')
+    
+    Resolution can be:
+    - Static: Socket default values or constant connections
+    - Dynamic: Non-constant connected values (e.g., from GridInfo, loop iteration)
     """
     builder = ctx['builder']
     get_socket_value = ctx['get_socket_value']
     socket_value_map = ctx['socket_value_map']
     get_socket_key = ctx['get_socket_key']
     
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Get input value (Field)
-    val_input = get_socket_value(node.inputs[0])
+    val_input = get_socket_value(node.inputs['Field'])
     
     if val_input is None:
         # Default to black if nothing connected
         val_input = builder.constant((0.0, 0.0, 0.0, 1.0), DataType.VEC4)
     
     # Determine dimensions from node property
-    is_3d = getattr(node, 'dimensions', '2D') == '3D'
+    is_3d = getattr(node, 'dim_mode', '2D') == '3D'
     dims = 3 if is_3d else 2
     
-    # Get target resolution
-    target_width = node.width
-    target_height = node.height
-    target_depth = getattr(node, 'depth', 1) if is_3d else 1
+    def get_size_info(socket_name, default):
+        """
+        Get size information from socket.
+        Returns (value, is_dynamic, expression)
+        - value: integer to use for static allocation
+        - is_dynamic: True if value is computed at runtime
+        - expression: Value object for runtime evaluation (or None)
+        """
+        if socket_name not in node.inputs:
+            return default, False, None
+        
+        socket = node.inputs[socket_name]
+        if not socket.is_linked:
+            return int(socket.default_value), False, None
+        
+        # Socket is connected - get the Value
+        val = get_socket_value(socket)
+        if val is None:
+            return int(socket.default_value), False, None
+        
+        # Check if it's a constant
+        if val.origin and hasattr(val.origin, 'attrs') and 'value' in val.origin.attrs:
+            # It's a CONSTANT op - extract static value
+            return int(val.origin.attrs['value']), False, None
+        
+        # It's a dynamic value (not constant) - mark as dynamic
+        # Use socket default as fallback size, but store expression for runtime
+        logger.info(f"Capture '{node.name}': {socket_name} is dynamic (non-constant)")
+        return int(socket.default_value), True, val
+    
+    # Get size info for each dimension
+    width_val, width_dynamic, width_expr = get_size_info('Width', 512)
+    height_val, height_dynamic, height_expr = get_size_info('Height', 512)
+    depth_val, depth_dynamic, depth_expr = get_size_info('Depth', 64) if dims == 3 else (1, False, None)
+    
+    # Determine if any dimension is dynamic
+    is_dynamic = width_dynamic or height_dynamic or (dims == 3 and depth_dynamic)
+    
+    # Build size expression dict for runtime evaluation
+    size_expression = {}
+    if width_dynamic:
+        size_expression['width'] = width_expr
+    if height_dynamic:
+        size_expression['height'] = height_expr
+    if dims == 3 and depth_dynamic:
+        size_expression['depth'] = depth_expr
     
     # Create size tuple based on dimensions
     if is_3d:
-        size = (target_width, target_height, target_depth)
+        size = (width_val, height_val, depth_val)
     else:
-        size = (target_width, target_height)
+        size = (width_val, height_val)
     
     # Create output Grid (ImageDesc)
     output_name = f"grid_{node.name}"
@@ -53,9 +102,14 @@ def handle_capture(node, ctx):
         access=ResourceAccess.READ_WRITE,
         format="rgba32f",
         size=size,
-        dimensions=dims
+        dimensions=dims,
+        dynamic_size=is_dynamic,
+        size_expression=size_expression if is_dynamic else {}
     )
     val_output = builder.add_resource(desc)
+    
+    if is_dynamic:
+        logger.info(f"Capture '{node.name}': marked as dynamic_size, expressions: {list(size_expression.keys())}")
     
     # Ensure input is VEC4 for storage
     if val_input.type == DataType.VEC3:

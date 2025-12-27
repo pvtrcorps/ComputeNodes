@@ -1,6 +1,6 @@
 import bpy
 from .nodetree import ComputeNodeTree, ComputeNode
-from .sockets import ComputeSocketGrid, ComputeSocketBuffer
+from .sockets import socket_classes
 
 # Import repeat module PropertyGroup (must be registered before nodes that use it)
 from .nodes.repeat import ComputeRepeatItem
@@ -13,9 +13,7 @@ classes = [
     ComputeRepeatItem,  # PropertyGroup first
     ComputeNodeTree,
     ComputeNode,
-    ComputeSocketGrid,
-    ComputeSocketBuffer,
-] + specific_nodes
+] + socket_classes + specific_nodes
 
 from . import categories
 from . import operators

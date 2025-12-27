@@ -43,8 +43,8 @@ def handle_noise_texture(node, ctx):
     inputs = [val_vec, val_w, val_scale, val_detail, val_rough, val_lacu, val_offset]
     
     attrs = {
-        'dimensions': node.dimensions,
-        'normalize': node.normalize
+        'dimensions': str(node.dim_mode),     # Use dim_mode property, not dimensions!
+        'normalize': bool(node.normalize)     # Convert to bool
     }
     
     op = builder.add_op(OpCode.NOISE, inputs, attrs)
@@ -91,7 +91,7 @@ def handle_white_noise(node, ctx):
     if val_w.type != DataType.FLOAT: val_w = builder.cast(val_w, DataType.FLOAT)
     
     inputs = [val_vec, val_w]
-    attrs = {'dimensions': node.dimensions}
+    attrs = {'dimensions': str(node.dim_mode)}  # Use dim_mode property!
     
     op = builder.add_op(OpCode.WHITE_NOISE, inputs, attrs)
     
@@ -161,10 +161,10 @@ def handle_voronoi_texture(node, ctx):
     inputs = [val_vec, val_w, val_scale, val_detail, val_rough, val_lacu, val_smooth, val_exp, val_rand]
     
     attrs = {
-        'dimensions': node.dimensions,
-        'feature': node.feature,
-        'metric': node.metric,
-        'normalize': node.normalize
+        'dimensions': str(node.dim_mode),    # Use dim_mode property!
+        'feature': str(node.feature),        # Convert EnumProperty to string
+        'metric': str(node.metric),          # Convert EnumProperty to string
+        'normalize': bool(node.normalize)    # Convert to bool
     }
     
     op = builder.add_op(OpCode.VORONOI, inputs, attrs)

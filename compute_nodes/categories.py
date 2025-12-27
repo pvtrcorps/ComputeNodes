@@ -24,8 +24,7 @@ node_categories = [
     ComputeNodeCategory("COMPUTE_CONTROL", "Control", items=[
         NodeItem("ComputeNodeSwitch"),
         NodeItem("ComputeNodeMix"),
-        NodeItem("ComputeNodeRepeatInput"),
-        NodeItem("ComputeNodeRepeatOutput"),
+        # Repeat nodes are added via draw function below
     ]),
     ComputeNodeCategory("COMPUTE_TEXTURE", "Texture", items=[
         NodeItem("ComputeNodeSample"),
@@ -63,10 +62,50 @@ node_categories = [
     ]),
 ]
 
+def add_node_button(layout, node_type):
+    """Helper to add a node button that matches Blender's style."""
+    props = layout.operator("node.add_node", text=node_type.bl_label)
+    props.type = node_type.bl_idname
+    props.use_transform = True
+
+def draw_add_menu(self, context):
+    """Custom draw function for node add menu to inject Repeat Zone operator."""
+    layout = self.layout
+    
+    # Only show for ComputeNodeTree
+    if context.space_data.tree_type != 'ComputeNodeTree':
+        return
+    
+    # This gets called for each category - we only want to inject into Control
+    # Since we can't easily detect which category we're in, we'll add our custom section
+    # This is a bit of a hack but works reliably
+    pass
+
+# Alternative: Draw function that adds to a specific category
+def draw_repeat_zone_in_menu(self, context):
+    """Inject Repeat Zone operator into the node add menu."""
+    layout = self.layout
+    
+    # Only for ComputeNodeTree
+    if not hasattr(context.space_data, 'tree_type'):
+        return
+    if context.space_data.tree_type != 'ComputeNodeTree':
+        return
+    
+    # Add separator and our operator
+    layout.separator()
+    layout.operator("compute.add_repeat_zone_pair", text="Repeat Zone", icon='LOOP_FORWARDS')
+
 def register():
     try:
         import nodeitems_utils
         nodeitems_utils.register_node_categories("COMPUTE_NODES", node_categories)
+        
+        # Register our custom menu draw function
+        # This adds to the NODE_MT_add menu (the main Add menu in node editor)
+        import bpy
+        bpy.types.NODE_MT_add.append(draw_repeat_zone_in_menu)
+        
     except Exception as e:
         print(f"Failed to register node categories: {e}")
 
@@ -74,5 +113,11 @@ def unregister():
     try:
         import nodeitems_utils
         nodeitems_utils.unregister_node_categories("COMPUTE_NODES")
+        
+        # Unregister menu draw function
+        import bpy
+        if hasattr(bpy.types.NODE_MT_add, 'remove'):
+            bpy.types.NODE_MT_add.remove(draw_repeat_zone_in_menu)
+        
     except Exception as e:
         print(f"Failed to unregister node categories: {e}")

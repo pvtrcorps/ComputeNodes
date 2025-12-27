@@ -4,6 +4,13 @@ from bpy.props import IntProperty, EnumProperty
 from ..nodetree import ComputeNode
 
 
+def update_dimensions(self, context):
+    """Update socket visibility based on 2D/3D mode."""
+    if 'Depth' in self.inputs:
+        # Hide socket in 2D mode, show in 3D mode
+        self.inputs['Depth'].hide = (self.dim_mode == '2D')
+
+
 class ComputeNodeCapture(ComputeNode):
     """
     Capture (Materialize) a procedural field to a Grid.
@@ -18,14 +25,17 @@ class ComputeNodeCapture(ComputeNode):
     - Grid1D: width only (future)
     - Grid2D: width x height
     - Grid3D: width x height x depth
+    
+    Resolution can be set via:
+    - Input sockets (dynamic/connected values, e.g., from GridInfo or loop Iteration)
+    - Socket default values (static values when not connected)
     """
     bl_idname = 'ComputeNodeCapture'
     bl_label = 'Capture'
     bl_icon = 'RENDERLAYERS'
     node_category = "GRID"
     
-    # Grid dimensions
-    # Grid dimensions (renamed from dimensions to avoid conflict with node size)
+    # Grid dimensions mode
     dim_mode: EnumProperty(
         name="Dimensions",
         items=[
@@ -33,40 +43,28 @@ class ComputeNodeCapture(ComputeNode):
             ('3D', "3D", "Volume: width × height × depth"),
         ],
         default='2D',
-        description="Grid dimensionality"
-    )
-    
-    # Output resolution
-    width: IntProperty(
-        name="Width",
-        default=512,
-        min=1,
-        max=16384,
-        description="Grid width in pixels/voxels"
-    )
-    
-    height: IntProperty(
-        name="Height", 
-        default=512,
-        min=1,
-        max=16384,
-        description="Grid height in pixels/voxels"
-    )
-    
-    depth: IntProperty(
-        name="Depth",
-        default=64,
-        min=1,
-        max=2048,
-        description="Grid depth in voxels (for 3D)"
+        description="Grid dimensionality",
+        update=update_dimensions
     )
     
     def init(self, context):
         self.apply_node_color()
         # Input: procedural field/color value
         self.inputs.new('NodeSocketColor', "Field")
+        # Resolution inputs - allow dynamic values
+        self.inputs.new('NodeSocketInt', "Width")
+        self.inputs.new('NodeSocketInt', "Height")
+        self.inputs.new('NodeSocketInt', "Depth")
         # Output: Grid handle (cyan socket)
         self.outputs.new('ComputeSocketGrid', "Grid")
+        
+        # Set default values on sockets
+        self.inputs['Width'].default_value = 512
+        self.inputs['Height'].default_value = 512
+        self.inputs['Depth'].default_value = 64
+        
+        # Hide Depth socket by default (2D mode)
+        self.inputs['Depth'].hide = True
         
     def draw_label(self):
         self._draw_node_color()
@@ -74,14 +72,8 @@ class ComputeNodeCapture(ComputeNode):
         
     def draw_buttons(self, context, layout):
         layout.prop(self, "dim_mode")
-        col = layout.column(align=True)
-        col.prop(self, "width")
-        col.prop(self, "height")
-        if self.dim_mode == '3D':
-            col.prop(self, "depth")
 
 
 # Export for registration
 node_classes = [ComputeNodeCapture]
-
 
