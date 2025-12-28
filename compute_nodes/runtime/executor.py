@@ -273,6 +273,7 @@ class ComputeExecutor:
         logger.debug(f"Pass {compute_pass.id}: dispatch({dispatch_w}x{dispatch_h}x{dispatch_d}) -> groups({group_x}x{group_y}x{group_z})")
         
         # Set dispatch size uniforms for Position normalization
+        # Set dispatch size uniforms for Position normalization
         try:
             shader.uniform_int("u_dispatch_width", dispatch_w)
             shader.uniform_int("u_dispatch_height", dispatch_h)
@@ -280,13 +281,68 @@ class ComputeExecutor:
         except Exception as e:
             logger.debug(f"Could not set dispatch uniforms: {e}")
         
+        # PROFILING: Start Timer
+        should_profile = getattr(graph, 'profile_execution', False)
+        start_time = 0.0
+        
+        if should_profile:
+            import time
+            self._gl_finish() # Ensure previous work is done
+            start_time = time.perf_counter()
+
         try:
             gpu.compute.dispatch(shader, group_x, group_y, group_z)
         except Exception as e:
             logger.error(f"Dispatch failed: {e}")
-        
+            
+        # PROFILING: Stop Timer
+        if should_profile:
+            self._gl_finish() # Ensure this dispatch is done
+            end_time = time.perf_counter()
+            elapsed_ms = (end_time - start_time) * 1000.0
+            
+            # Attribute time to participating nodes
+            seen_nodes = set()
+            for op in compute_pass.ops:
+                if hasattr(op, 'origin') and op.origin:
+                    node = op.origin
+                    # Check if 'node' is a Blender Node object (has 'execution_time' prop)
+                    # Note: op.origin might be a proxy or something else depending on graph extraction
+                    # But usually it is the Node object.
+                    if hasattr(node, 'execution_time') and node not in seen_nodes:
+                        node.execution_time = elapsed_ms
+                        seen_nodes.add(node)
+                        
+            # Accumulate total time (simplistic, assumes sequential passes)
+            if hasattr(graph, "execution_time_total"):
+                graph.execution_time_total += elapsed_ms
+
         # Memory barrier: ensures texture writes are visible before next pass reads
         self._memory_barrier()
+
+    def _gl_finish(self):
+        """Wait for all GPU commands to complete (for profiling)."""
+        import platform
+        import ctypes
+        
+        try:
+            if platform.system() == 'Windows':
+                opengl32 = ctypes.windll.opengl32
+                glFinish = opengl32.glFinish
+            else:
+                # Linux/macOS
+                try:
+                    libgl = ctypes.CDLL('libGL.so.1')
+                except OSError:
+                    try:
+                        libgl = ctypes.CDLL('/System/Library/Frameworks/OpenGL.framework/OpenGL')
+                    except OSError:
+                        return
+                glFinish = libgl.glFinish
+            
+            glFinish()
+        except Exception as e:
+            pass
 
     def _run_pass_loop(self, graph, loop: PassLoop, texture_map, context_width, context_height):
         """

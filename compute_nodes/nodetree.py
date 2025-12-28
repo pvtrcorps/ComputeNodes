@@ -135,6 +135,17 @@ class ComputeNodeTree(NodeTree):
         description="Automatically execute graph on changes",
         default=False
     )
+    
+    profile_execution: bpy.props.BoolProperty(
+        name="Profile Execution",
+        description="Measure execution time of each node",
+        default=False
+    )
+    
+    execution_time_total: bpy.props.FloatProperty(
+        name="Total Execution Time",
+        default=0.0
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -146,6 +157,14 @@ class ComputeNode(Node):
     bl_label = "Compute Node"
     
     node_category = "DEFAULT"
+    
+    # Performance profiling
+    execution_time: bpy.props.FloatProperty(
+        name="Execution Time",
+        description="Time spent executing this node (ms)",
+        default=0.0,
+        precision=3
+    )
     
     @classmethod
     def poll(cls, nodetree):
@@ -214,6 +233,10 @@ class ComputeNode(Node):
         """Draw the node label and color overlay."""
         # Calling this here draws inside the node drawing context matchin GeneralRig
         self._draw_node_color()
+        
+        # Draw execution time if available and significant
+        if self.execution_time > 0.001:
+             return f"{self.bl_label} ({self.execution_time:.2f} ms)"
         return self.bl_label
     
     def update(self):

@@ -85,8 +85,6 @@ def handle_viewer(node, ctx):
     builder.graph.viewer_outputs[output_name] = {
         'node': node,
         'resource_index': val_output.resource_index,
-        'channel': node.channel,
-        'exposure': node.exposure,
     }
     
     # Update node's internal reference

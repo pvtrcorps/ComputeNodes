@@ -68,8 +68,17 @@ def execute_compute_tree(tree, context):
             width = int(render.resolution_x * scale)
             height = int(render.resolution_y * scale)
 
-        
+        # PROFILING: Propagate settings to Graph
+        graph.profile_execution = getattr(tree, 'profile_execution', False)
+        if graph.profile_execution:
+            graph.execution_time_total = 0.0
+            # Reset node times? Done by executor overwriting, but good ensuring validity
+            
         executor.execute_graph(graph, passes, context_width=width, context_height=height)
+        
+        # PROFILING: Sync results back to Tree
+        if graph.profile_execution:
+            tree.execution_time_total = getattr(graph, 'execution_time_total', 0.0)
         
         # Force redraw (if UI is available)
         if hasattr(context, "window_manager") and context.window_manager:
@@ -132,6 +141,12 @@ class COMPUTE_PT_MainPanel(bpy.types.Panel):
         
         if tree:
             row.prop(tree, "auto_execute", text="", icon='FILE_REFRESH')
+            
+            # Profiling Controls
+            row = layout.row(align=True)
+            row.prop(tree, "profile_execution", toggle=True, icon='TIME')
+            if tree.profile_execution:
+                row.label(text=f"{tree.execution_time_total:.2f} ms")
 
 # ============================================================================
 # UI LIST & PANELS
