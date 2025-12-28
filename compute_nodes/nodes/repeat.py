@@ -95,8 +95,27 @@ class ComputeNodeRepeatInput(ComputeNode):
     
     def _ensure_extension_socket(self):
         """Add the special extension socket for drag-to-add pattern."""
+        # Input side Empty
         if not self.inputs or self.inputs[-1].bl_idname != 'ComputeSocketEmpty':
             self.inputs.new('ComputeSocketEmpty', "Empty")
+        
+        # Output side Empty (for connecting Current values)
+        if not self.outputs or self.outputs[-1].bl_idname != 'ComputeSocketEmpty':
+            self.outputs.new('ComputeSocketEmpty', "Empty")
+    
+    def _make_unique_name(self, base_name):
+        """Ensure name is unique among repeat_items."""
+        existing = {item.name for item in self.repeat_items}
+        if base_name not in existing:
+            return base_name
+        
+        # Add number suffix like Blender does
+        i = 1
+        while True:
+            new_name = f"{base_name}.{i:03d}"
+            if new_name not in existing:
+                return new_name
+            i += 1
             
     def draw_socket(self, context, layout, socket, text):
         if socket.bl_idname == 'ComputeSocketEmpty':
@@ -108,77 +127,118 @@ class ComputeNodeRepeatInput(ComputeNode):
         """Check if socket is the extension socket."""
         return socket.bl_idname == 'ComputeSocketEmpty'
     
-    def _get_extension_socket(self):
+    def _get_extension_socket(self, is_output=False):
         """Find the extension socket."""
-        if self.inputs and self.inputs[-1].bl_idname == 'ComputeSocketEmpty':
-            return self.inputs[-1]
+        sockets = self.outputs if is_output else self.inputs
+        if sockets and sockets[-1].bl_idname == 'ComputeSocketEmpty':
+            return sockets[-1]
         return None
     
     def update(self):
         """Called when node connections change."""
-        # Check if extension socket got connected
-        ext_socket = self._get_extension_socket()
-        if ext_socket and ext_socket.is_linked:
-            # Get type from incoming connection
+        # Check BOTH input and output extension sockets
+        # Input Empty: for connecting Initial values
+        # Output Empty: for connecting Current values (inside loop)
+        
+        for is_output in [False, True]:
+            ext_socket = self._get_extension_socket(is_output=is_output)
+            if not ext_socket or not ext_socket.is_linked:
+                continue
+            
+            # Get the link
             link = ext_socket.links[0]
-            from_socket = link.from_socket
+            
+            # Determine the connected socket type
+            if is_output:
+                # Output socket connected: check destination
+                connected_socket = link.to_socket
+            else:
+                # Input socket connected: check source
+                connected_socket = link.from_socket
             
             # GRID-ONLY VALIDATION
-            # Repeat zones only support Grid state due to multi-pass architecture
-            if 'Grid' not in from_socket.bl_idname:
-                # Reject non-Grid connection
+            if 'Grid' not in connected_socket.bl_idname:
                 self.id_data.links.remove(link)
-                
-                # Report error to user
                 self.report({'ERROR'}, 
                     f"Repeat zone only accepts Grid state. "
-                    f"Connected socket type: {from_socket.bl_idname}. "
                     f"Use Capture to convert Field → Grid before the loop.")
-                return
+                continue
             
-            # Only Grid sockets allowed
-            socket_type = 'ComputeSocketGrid'
-            repeat_type = socket_type
+            # Store reconnection info
+            if is_output:
+                # Output connected: reconnect to new Current output
+                to_node = link.to_node
+                to_socket_name = link.to_socket.name
+            else:
+                # Input connected: reconnect to new Initial input
+                from_node = link.from_node
+                from_socket_name = link.from_socket.name
             
-            # Store the from_node and from_socket for reconnection
-            from_node = link.from_node
-            from_socket_name = from_socket.name
-            
-            # Remove the link first (we'll recreate it to the new socket)
+            # Remove link
             self.id_data.links.remove(link)
             
             # Add new state item
-            item = self.repeat_items.add()
-            item.name = f"State {len(self.repeat_items)}"
-            item.socket_type = repeat_type
+            # Inherit name from connected socket (like Geometry Nodes)
+            inherited_name = connected_socket.name if connected_socket.name else "State"
+            unique_name = self._make_unique_name(inherited_name)
             
-            # Sync sockets and reconnect
+            item = self.repeat_items.add()
+            item.name = unique_name
+            item.socket_type = 'ComputeSocketGrid'
+            
+            # Sync sockets
             self._sync_sockets()
             
-            # Find the new Initial socket and reconnect
-            new_socket_name = f"Initial: {item.name}"
-            if new_socket_name in self.inputs:
-                new_socket = self.inputs[new_socket_name]
-                # Reconnect via operator or direct link
-                self.id_data.links.new(from_node.outputs[from_socket_name], new_socket)
+            # Reconnect to new socket
+            if is_output:
+                # Reconnect from new Current output
+                new_socket_name = item.name
+                if new_socket_name in self.outputs:
+                    self.id_data.links.new(
+                        self.outputs[new_socket_name],
+                        to_node.inputs[to_socket_name]
+                    )
+            else:
+                # Reconnect to new Initial input
+                new_socket_name = item.name
+                if new_socket_name in self.inputs:
+                    self.id_data.links.new(
+                        from_node.outputs[from_socket_name],
+                        self.inputs[new_socket_name]
+                    )
             
             # Sync paired output
             self._sync_paired_output()
+            
+            # Only process one connection at a time
+            break
     
     @with_sync_guard
     def _sync_sockets(self):
         """Rebuild sockets to match repeat_items collection."""
-        # Keep track of existing connections to restore
-        connections = {}
+        # Keep track of existing connections by SOCKET NAME
+        # This correctly handles both add and remove operations
+        connections_by_name = {}
+        
         for socket in self.inputs:
-            if socket.is_linked and not self._is_extension_socket(socket):
+            if socket.name == "Iterations" or self._is_extension_socket(socket):
+                continue
+            if socket.is_linked:
                 for link in socket.links:
-                    connections[socket.name] = (link.from_node.name, link.from_socket.name)
+                    if socket.name not in connections_by_name:
+                        connections_by_name[socket.name] = {}
+                    connections_by_name[socket.name]['input'] = (link.from_node.name, link.from_socket.name)
         
         for socket in self.outputs:
-            if socket.is_linked and socket.name != "Iteration":
+            if socket.name == "Iteration" or self._is_extension_socket(socket):
+                continue
+            if socket.is_linked:
                 for link in socket.links:
-                    connections[socket.name] = (link.to_node.name, link.to_socket.name)
+                    if socket.name not in connections_by_name:
+                        connections_by_name[socket.name] = {}
+                    if 'output' not in connections_by_name[socket.name]:
+                        connections_by_name[socket.name]['output'] = []
+                    connections_by_name[socket.name]['output'].append((link.to_node.name, link.to_socket.name))
         
         # Clear dynamic sockets (keep Iterations input and Iteration output)
         # Remove from end to avoid index issues
@@ -207,27 +267,32 @@ class ComputeNodeRepeatInput(ComputeNode):
         # Re-add extension socket
         self._ensure_extension_socket()
         
-        # Restore connections AFTER all sockets are created
+        
+        # Restore connections by SOCKET NAME (not index)
+        # The socket name we saved should still exist if the item wasn't removed
         tree = self.id_data
-        for socket_name, (node_name, other_socket_name) in connections.items():
-            if socket_name in self.inputs:
-                # Input connection: from other node to this
-                if node_name in tree.nodes:
-                    other_node = tree.nodes[node_name]
-                    if other_socket_name in other_node.outputs:
+        for socket_name, conn_data in connections_by_name.items():
+            # Restore input connection
+            if 'input' in conn_data and socket_name in self.inputs:
+                from_node_name, from_socket_name = conn_data['input']
+                if from_node_name in tree.nodes:
+                    from_node = tree.nodes[from_node_name]
+                    if from_socket_name in from_node.outputs:
                         tree.links.new(
-                            other_node.outputs[other_socket_name],
+                            from_node.outputs[from_socket_name],
                             self.inputs[socket_name]
                         )
-            elif socket_name in self.outputs:
-                # Output connection: from this to other node
-                if node_name in tree.nodes:
-                    other_node = tree.nodes[node_name]
-                    if other_socket_name in other_node.inputs:
-                        tree.links.new(
-                            self.outputs[socket_name],
-                            other_node.inputs[other_socket_name]
-                        )
+            
+            # Restore output connections
+            if 'output' in conn_data and socket_name in self.outputs:
+                for to_node_name, to_socket_name in conn_data['output']:
+                    if to_node_name in tree.nodes:
+                        to_node = tree.nodes[to_node_name]
+                        if to_socket_name in to_node.inputs:
+                            tree.links.new(
+                                self.outputs[socket_name],
+                                to_node.inputs[to_socket_name]
+                            )
     
     def _sync_paired_output(self):
         """Synchronize state items to paired Repeat Output."""
@@ -253,17 +318,13 @@ class ComputeNodeRepeatInput(ComputeNode):
     
     def draw_buttons(self, context, layout):
         """Draw node body (minimal - main UI in sidebar)."""
-        col = layout.column()
-        col.scale_y = 0.8
-        if len(self.repeat_items) == 0:
-            col.label(text="Drag link to add state", icon='INFO')
-        else:
-            col.label(text=f"{len(self.repeat_items)} state(s)")
+        pass  # Clean appearance, no messages
     
     def add_state(self, name="State", socket_type='NodeSocketFloat'):
         """Add a new state variable (called from operator)."""
+        unique_name = self._make_unique_name(name)
         item = self.repeat_items.add()
-        item.name = name
+        item.name = unique_name
         item.socket_type = socket_type
         self._sync_sockets()
         self._sync_paired_output()
@@ -304,44 +365,201 @@ class ComputeNodeRepeatOutput(ComputeNode):
     )
     
     def init(self, context):
-        # Sockets will be created by pairing with RepeatInput
-        pass
+        # Extension socket for drag-to-add pattern (same as Input)
+        self._ensure_extension_socket()
+    
+    def _ensure_extension_socket(self):
+        """Add the special extension socket for drag-to-add pattern."""
+        # Input side Empty (for Next values)
+        if not self.inputs or self.inputs[-1].bl_idname != 'ComputeSocketEmpty':
+            self.inputs.new('ComputeSocketEmpty', "Empty")
+        
+        # Output side Empty (for Final values)
+        if not self.outputs or self.outputs[-1].bl_idname != 'ComputeSocketEmpty':
+            self.outputs.new('ComputeSocketEmpty', "Empty")
+    
+    def _is_extension_socket(self, socket):
+        """Check if socket is the extension socket."""
+        return socket.bl_idname == 'ComputeSocketEmpty'
+    
+    def _get_extension_socket(self, is_output=False):
+        """Find the extension socket."""
+        sockets = self.outputs if is_output else self.inputs
+        if sockets and sockets[-1].bl_idname == 'ComputeSocketEmpty':
+            return sockets[-1]
+        return None
+    
+    def draw_socket(self, context, layout, socket, text):
+        if socket.bl_idname == 'ComputeSocketEmpty':
+            layout.label(text="")
+            return
+        layout.label(text=text)
+    
+    def update(self):
+        """Called when node connections change."""
+        # Check BOTH input and output extension sockets
+        # Input Empty: for connecting Next values
+        # Output Empty: for connecting Final values (after loop)
+        
+        for is_output in [False, True]:
+            ext_socket = self._get_extension_socket(is_output=is_output)
+            if not ext_socket or not ext_socket.is_linked:
+                continue
+            
+            # Get the link
+            link = ext_socket.links[0]
+            
+            # Determine the connected socket type
+            if is_output:
+                # Output socket connected: check destination
+                connected_socket = link.to_socket
+            else:
+                # Input socket connected: check source
+                connected_socket = link.from_socket
+            
+            # GRID-ONLY VALIDATION
+            if 'Grid' not in connected_socket.bl_idname:
+                self.id_data.links.remove(link)
+                self.report({'ERROR'}, 
+                    f"Repeat zone only accepts Grid state. "
+                    f"Use Capture to convert Field → Grid before the loop.")
+                continue
+            
+            # Store reconnection info
+            if is_output:
+                # Output connected: reconnect to new Final output
+                to_node = link.to_node
+                to_socket_name = link.to_socket.name
+            else:
+                # Input connected: reconnect to new Next input
+                from_node = link.from_node
+                from_socket_name = link.from_socket.name
+            
+            # Remove link first
+            self.id_data.links.remove(link)
+            
+            # Push new item to PAIRED INPUT (Input remains source of truth)
+            tree = self.id_data
+            if self.paired_input and self.paired_input in tree.nodes:
+                input_node = tree.nodes[self.paired_input]
+                
+                # Inherit name from connected socket (like Geometry Nodes)
+                inherited_name = connected_socket.name if connected_socket.name else "State"
+                unique_name = input_node._make_unique_name(inherited_name)
+                
+                # Add new state item to Input
+                item = input_node.repeat_items.add()
+                item.name = unique_name
+                item.socket_type = 'ComputeSocketGrid'
+                
+                # Sync Input's sockets
+                input_node._sync_sockets()
+                
+                # Sync back to Output (us)
+                input_node._sync_paired_output()
+                
+                # Reconnect to new socket on Output
+                new_socket_name = item.name
+                if is_output:
+                    # Reconnect from new Final output
+                    if new_socket_name in self.outputs:
+                        self.id_data.links.new(
+                            self.outputs[new_socket_name],
+                            to_node.inputs[to_socket_name]
+                        )
+                else:
+                    # Reconnect to new Next input
+                    if new_socket_name in self.inputs:
+                        self.id_data.links.new(
+                            from_node.outputs[from_socket_name],
+                            self.inputs[new_socket_name]
+                        )
+            
+            # Only process one connection at a time
+            break
     
     @with_sync_guard
     def _sync_sockets(self):
         """Rebuild sockets to match repeat_items collection from paired input."""
+        # Keep track of existing connections by SOCKET NAME
+        connections_by_name = {}
+        
+        for socket in self.inputs:
+            if self._is_extension_socket(socket):
+                continue
+            if socket.is_linked:
+                for link in socket.links:
+                    if socket.name not in connections_by_name:
+                        connections_by_name[socket.name] = {}
+                    connections_by_name[socket.name]['input'] = (link.from_node.name, link.from_socket.name)
+        
+        for socket in self.outputs:
+            if self._is_extension_socket(socket):
+                continue
+            if socket.is_linked:
+                for link in socket.links:
+                    if socket.name not in connections_by_name:
+                        connections_by_name[socket.name] = {}
+                    if 'output' not in connections_by_name[socket.name]:
+                        connections_by_name[socket.name]['output'] = []
+                    connections_by_name[socket.name]['output'].append((link.to_node.name, link.to_socket.name))
+        
         # Clear all sockets
         self.inputs.clear()
         self.outputs.clear()
         
         # Get repeat_items from paired input
         if not self.paired_input:
+            self._ensure_extension_socket()
             return
         
         node_tree = self.id_data
         if not node_tree:
+            self._ensure_extension_socket()
             return
         
         paired = node_tree.nodes.get(self.paired_input)
         if not paired or not hasattr(paired, 'repeat_items'):
+            self._ensure_extension_socket()
             return
         
         # Add sockets for each repeat item from paired input
         for item in paired.repeat_items:
             socket_type = item.socket_type
-            
-            # Input: Next value (just use state name)
             self.inputs.new(socket_type, item.name)
-            
-            # Output: Final value (just use state name)
             self.outputs.new(socket_type, item.name)
+        
+        # Re-add extension socket
+        self._ensure_extension_socket()
+        
+        # Restore connections by socket name
+        tree = self.id_data
+        for socket_name, conn_data in connections_by_name.items():
+            # Restore input connection
+            if 'input' in conn_data and socket_name in self.inputs:
+                from_node_name, from_socket_name = conn_data['input']
+                if from_node_name in tree.nodes:
+                    from_node = tree.nodes[from_node_name]
+                    if from_socket_name in from_node.outputs:
+                        tree.links.new(
+                            from_node.outputs[from_socket_name],
+                            self.inputs[socket_name]
+                        )
+            
+            # Restore output connections
+            if 'output' in conn_data and socket_name in self.outputs:
+                for to_node_name, to_socket_name in conn_data['output']:
+                    if to_node_name in tree.nodes:
+                        to_node = tree.nodes[to_node_name]
+                        if to_socket_name in to_node.inputs:
+                            tree.links.new(
+                                self.outputs[socket_name],
+                                to_node.inputs[to_socket_name]
+                            )
     
     def draw_buttons(self, context, layout):
         """Draw node body."""
-        if not self.paired_input:
-            layout.label(text="Not paired", icon='ERROR')
-        elif len(self.repeat_items) == 0:
-            layout.label(text="No states", icon='INFO')
+        pass  # Clean appearance, no messages
 
 
 # =============================================================================

@@ -92,10 +92,6 @@ class ComputeNodeOutputImage(ComputeNode):
             box.prop(self, "file_format", text="Format")
         elif self.save_mode == 'PACK':
             layout.label(text="Will pack after execution", icon='PACKAGE')
-        
-        # Hint if not connected
-        if not self.inputs[0].is_linked:
-            layout.label(text="Connect a Grid", icon='INFO')
     
     def update(self):
         pass

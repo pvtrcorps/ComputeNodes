@@ -104,11 +104,6 @@ class ComputeNodeOutputSequence(ComputeNode):
         box = layout.box()
         box.scale_y = 0.7
         box.label(text=f"Preview: {preview_first}", icon='FILE_IMAGE')
-        
-        # Hint if not connected
-        if not self.inputs[0].is_linked:
-            layout.label(text="Connect a Grid3D", icon='INFO')
-            layout.label(text="(Capture with 3D mode)")
     
     def update(self):
         pass
