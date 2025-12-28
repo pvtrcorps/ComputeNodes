@@ -17,6 +17,7 @@ classes = [
 
 from . import categories
 from . import operators
+from . import ui  # Zone drawing and visual enhancements
 
 def register():
     for cls in classes:
@@ -27,12 +28,16 @@ def register():
     repeat_module.register()
     # Register nodegroup operators
     nodegroup_module.register()
+    # Register UI enhancements (zone drawing)
+    ui.register()
 
 def unregister():
+    ui.unregister()
     nodegroup_module.unregister()
     repeat_module.unregister()
     operators.unregister()
     categories.unregister()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
+
 

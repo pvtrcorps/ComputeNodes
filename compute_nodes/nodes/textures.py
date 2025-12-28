@@ -62,10 +62,10 @@ class ComputeNodeWhiteNoise(ComputeNode):
     node_category = "TEXTURE"
     
     def update_sockets(self, context):
-        self.inputs['Vector'].hide = (self.dimensions == '1D')
-        self.inputs['W'].hide = (self.dimensions not in {'1D', '4D'})
+        self.inputs['Vector'].hide = (self.dim_mode == '1D')
+        self.inputs['W'].hide = (self.dim_mode not in {'1D', '4D'})
 
-    dimensions: EnumProperty(
+    dim_mode: EnumProperty(
         name="Dimensions",
         items=[
             ('1D', "1D", "Use 1D noise"),
@@ -88,7 +88,7 @@ class ComputeNodeWhiteNoise(ComputeNode):
         self.update_sockets(context)
         
     def draw_buttons(self, context, layout):
-        layout.prop(self, "dimensions", text="")
+        layout.prop(self, "dim_mode", text="")
         
 
     def draw_label(self):

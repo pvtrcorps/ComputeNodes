@@ -123,16 +123,22 @@ class ComputeNodeRepeatInput(ComputeNode):
             link = ext_socket.links[0]
             from_socket = link.from_socket
             
-            # Infer type
-            socket_type = 'NodeSocketFloat'
-            t = from_socket.bl_idname
-            if 'Vector' in t: socket_type = 'NodeSocketVector'
-            elif 'Color' in t: socket_type = 'NodeSocketColor'
-            elif 'Grid' in t: socket_type = 'ComputeSocketGrid'
-            elif 'Buffer' in t: socket_type = 'ComputeSocketBuffer'
+            # GRID-ONLY VALIDATION
+            # Repeat zones only support Grid state due to multi-pass architecture
+            if 'Grid' not in from_socket.bl_idname:
+                # Reject non-Grid connection
+                self.id_data.links.remove(link)
+                
+                # Report error to user
+                self.report({'ERROR'}, 
+                    f"Repeat zone only accepts Grid state. "
+                    f"Connected socket type: {from_socket.bl_idname}. "
+                    f"Use Capture to convert Field → Grid before the loop.")
+                return
             
+            # Only Grid sockets allowed
+            socket_type = 'ComputeSocketGrid'
             repeat_type = socket_type
-
             
             # Store the from_node and from_socket for reconnection
             from_node = link.from_node
@@ -192,13 +198,11 @@ class ComputeNodeRepeatInput(ComputeNode):
         for item in self.repeat_items:
             socket_type = item.socket_type
             
-            # Input: Initial value
-            input_name = f"Initial: {item.name}"
-            self.inputs.new(socket_type, input_name)
+            # Input: Initial value (just use state name)
+            self.inputs.new(socket_type, item.name)
             
-            # Output: Current value (for use inside loop)
-            output_name = f"Current: {item.name}"
-            self.outputs.new(socket_type, output_name)
+            # Output: Current value (just use state name for use inside loop)
+            self.outputs.new(socket_type, item.name)
         
         # Re-add extension socket
         self._ensure_extension_socket()
@@ -326,13 +330,11 @@ class ComputeNodeRepeatOutput(ComputeNode):
         for item in paired.repeat_items:
             socket_type = item.socket_type
             
-            # Input: Next value (computed inside loop)
-            input_name = f"Next: {item.name}"
-            self.inputs.new(socket_type, input_name)
+            # Input: Next value (just use state name)
+            self.inputs.new(socket_type, item.name)
             
-            # Output: Final value (after all iterations)
-            output_name = f"Final: {item.name}"
-            self.outputs.new(socket_type, output_name)
+            # Output: Final value (just use state name)
+            self.outputs.new(socket_type, item.name)
     
     def draw_buttons(self, context, layout):
         """Draw node body."""
@@ -490,7 +492,7 @@ class COMPUTE_PT_repeat_zone(bpy.types.Panel):
     """Sidebar panel for managing Repeat Zone states."""
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
-    bl_category = 'Item' # Show in the "Node" tab (context sensitive)
+    bl_category = 'Node'  # Show in the "Node" tab
     bl_label = "Repeat Zone"
     
     @classmethod
@@ -538,13 +540,13 @@ class COMPUTE_PT_repeat_zone(bpy.types.Panel):
              op.index = repeat_input.active_index
              
         # Properties of Active Item
-        if repeat_input.repeat_items and repeat_input.active_index < len(repeat_input.repeat_items):
+        if (repeat_input.repeat_items and 
+            0 <= repeat_input.active_index < len(repeat_input.repeat_items)):
             item = repeat_input.repeat_items[repeat_input.active_index]
             
             box = layout.box()
-            box.label(text="Item Properties", icon='PREFERENCES')
             box.prop(item, "name")
-            box.prop(item, "socket_type")
+            # Socket type is always Grid (no selector needed)
 
 
 # =============================================================================

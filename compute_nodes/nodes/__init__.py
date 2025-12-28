@@ -1,5 +1,5 @@
 from .math import ComputeNodeMath
-from .input import ComputeNodeImageInput, ComputeNodeImageInfo
+from .input import ComputeNodeImageInput, ComputeNodeImageInfo, ComputeNodeValue
 from .output import ComputeNodeOutputImage
 from .output_sequence import ComputeNodeOutputSequence
 from .accessors import ComputeNodePosition, ComputeNodeSample
@@ -19,6 +19,7 @@ node_classes = [
     ComputeNodeMath,
     ComputeNodeImageInput,
     ComputeNodeImageInfo,
+    ComputeNodeValue,
     ComputeNodeOutputImage,
     ComputeNodeOutputSequence,
     ComputeNodePosition,

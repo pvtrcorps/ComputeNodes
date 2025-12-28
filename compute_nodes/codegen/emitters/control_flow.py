@@ -64,32 +64,24 @@ def emit_pass_loop_begin(op, ctx):
 
 def emit_pass_loop_end(op, ctx):
     """
-    PASS_LOOP_END: No-op in GLSL.
-    Values are passed through ping-pong buffers by executor.
-    Skip HANDLE outputs - grids are resources, not GLSL variables.
+    PASS_LOOP_END: Minimal emission for multi-pass loops.
+    
+    Multi-pass loops are executed N times by the executor, NOT by GLSL for-loops.
+    Scalars cannot be passed between iterations (no ping-pong buffer).
+    
+    Grid states use ping-pong buffers managed by executor - no GLSL code needed.
+    Scalar states CANNOT reference inputs from previous iterations - they don't exist!
+    
+    Solution: Don't emit ANY code for loop outputs. The executor handles state.
     """
     from ...ir.types import DataType
     
-    type_str = ctx['type_str']
-    param = ctx['param']
-    lines = []
+    # For multi-pass loops, the state is managed entirely by the executor
+    # via ping-pong buffers (Grids) or is unsupported (scalars).
+    # We shouldn't generate any GLSL code that tries to reference "next" values
+    # from previous shader invocations - they don't exist in the same shader!
     
-    # Declare outputs that reference the "next" values
-    # Skip HANDLE types - they're image resources, not GLSL variables
-    for i, out in enumerate(op.outputs):
-        if out.type == DataType.HANDLE:
-            # Grid outputs - no GLSL declaration needed
-            lines.append(f"    // Grid state passed via ping-pong buffer")
-            continue
-            
-        out_type = type_str(out.type)
-        if i < len(op.inputs):
-            val = param(op.inputs[i])
-            lines.append(f"    {out_type} v{out.id} = {val};")
-        else:
-            lines.append(f"    {out_type} v{out.id};  // loop final")
-    
-    return "\n".join(lines)
+    return "    // Multi-pass loop end (state managed by executor)"
 
 
 def emit_pass_loop_read(op, ctx):

@@ -65,31 +65,42 @@ def handle_repeat_output(node, ctx):
     repeat_items = list(repeat_input.repeat_items)
     
     for i, item in enumerate(repeat_items):
-        # Get the Initial socket value
-        initial_socket_name = f"Initial: {item.name}"
-        current_socket_name = f"Current: {item.name}"
-        next_socket_name = f"Next: {item.name}"
-        final_socket_name = f"Final: {item.name}"
+        # Socket names now use just the item name (no prefixes)
+        # RepeatInput: inputs use item.name, outputs use item.name
+        # RepeatOutput: inputs use item.name, outputs use item.name
+        socket_name = item.name
         
         val_initial = None
-        if initial_socket_name in repeat_input.inputs:
-            val_initial = get_socket_value(repeat_input.inputs[initial_socket_name])
+        if socket_name in repeat_input.inputs:
+            val_initial = get_socket_value(repeat_input.inputs[socket_name])
         
         # Determine data type
         # socket_type uses Blender socket bl_idnames (e.g. 'ComputeSocketGrid', 'NodeSocketFloat')
         is_grid = item.socket_type == 'ComputeSocketGrid'
-        data_type = DataType.HANDLE if is_grid else _socket_type_to_datatype(item.socket_type)
+        
+        # GRID-ONLY VALIDATION
+        # Multi-pass GPU loops can only pass Grid state between iterations
+        # Fields/scalars cannot be serialized between separate shader programs
+        if not is_grid:
+            raise ValueError(
+                f"Repeat zone state '{item.name}' must be a Grid (got {item.socket_type}).\n"
+                f"Multi-pass GPU loops cannot pass Fields or scalar values between iterations.\n"
+                f"Each iteration runs as a separate shader with no shared variables.\n\n"
+                f"Solution: Use Capture to convert Field → Grid before the loop:\n"
+                f"  Noise → Capture → Repeat Input ✅\n"
+                f"  Noise → Repeat Input ❌\n\n"
+                f"See GEMINI.md for details on Grid vs Field architecture."
+            )
+        
+        data_type = DataType.HANDLE  # Always HANDLE for Grids
         
         state = {
             'name': item.name,
             'index': i,
-            'is_grid': is_grid,
+            'is_grid': True,  # Always True now
             'data_type': data_type,
             'initial_value': val_initial,
-            'initial_socket': initial_socket_name,
-            'current_socket': current_socket_name,
-            'next_socket': next_socket_name,
-            'final_socket': final_socket_name,
+            'socket_name': socket_name,  # Unified socket name (replaces initial/current/next/final)
         }
         
         # For Grid states, create ping-pong buffer resources
@@ -150,33 +161,27 @@ def handle_repeat_output(node, ctx):
     key_iteration = get_socket_key(repeat_input.outputs["Iteration"])
     socket_value_map[key_iteration] = val_iteration
     
-    # Create read values for each state variable
+    # Create read values for each state variable (all Grids now)
     for state in state_vars:
-        if state['is_grid']:
-            # Grid: emit PASS_LOOP_READ that references ping buffer
-            op_read = builder.add_op(OpCode.PASS_LOOP_READ, [])
-            op_read.metadata = {'state_index': state['index'], 'state_name': state['name']}
-            
-            val_current = builder._new_value(ValueKind.SSA, DataType.HANDLE, origin=op_read)
-            if 'ping_idx' in state:
-                val_current.resource_index = state['ping_idx']
-            op_read.add_output(val_current)
-        else:
-            # Scalar/Vector: just use initial value for now (will be loop variable)
-            val_current = state['initial_value']
-            if val_current is None:
-                val_current = builder.constant(0.0, state['data_type'])
+        # Grid: emit PASS_LOOP_READ that references ping buffer
+        op_read = builder.add_op(OpCode.PASS_LOOP_READ, [])
+        op_read.metadata = {'state_index': state['index'], 'state_name': state['name']}
         
-        # Map to Current socket
-        current_key = get_socket_key(repeat_input.outputs[state['current_socket']])
+        val_current = builder._new_value(ValueKind.SSA, DataType.HANDLE, origin=op_read)
+        if 'ping_idx' in state:
+            val_current.resource_index = state['ping_idx']
+        op_read.add_output(val_current)
+        
+        # Map to Current socket (same name on output)
+        current_key = get_socket_key(repeat_input.outputs[state['socket_name']])
         socket_value_map[current_key] = val_current
         state['current_value'] = val_current
     
     # Now process the body (get values flowing into Next sockets)
     for state in state_vars:
         val_next = None
-        if state['next_socket'] in node.inputs:
-            val_next = get_socket_value(node.inputs[state['next_socket']])
+        if state['socket_name'] in node.inputs:
+            val_next = get_socket_value(node.inputs[state['socket_name']])
         
         if val_next is None:
             val_next = state.get('current_value')
@@ -209,7 +214,7 @@ def handle_repeat_output(node, ctx):
     op_end = builder.add_op(OpCode.PASS_LOOP_END, next_values)
     op_end.metadata = loop_metadata
     
-    # Create output values for Final sockets
+    # Create output values for Final sockets (same name on output)
     results = {}
     for i, state in enumerate(state_vars):
         val_final = builder._new_value(ValueKind.SSA, state['data_type'], origin=op_end)
@@ -218,8 +223,8 @@ def handle_repeat_output(node, ctx):
         if state['is_grid'] and 'pong_idx' in state:
             val_final.resource_index = state['pong_idx']
         
-        # Map to Final socket
-        final_key = get_socket_key(node.outputs[state['final_socket']])
+        # Map to Final socket (same name on RepeatOutput output)
+        final_key = get_socket_key(node.outputs[state['socket_name']])
         socket_value_map[final_key] = val_final
         results[state['name']] = val_final
     
@@ -228,7 +233,7 @@ def handle_repeat_output(node, ctx):
     if output_socket_needed:
         # Find which state matches the requested socket
         for state in state_vars:
-            if state['final_socket'] == output_socket_needed.name:
+            if state['socket_name'] == output_socket_needed.name:
                 return results.get(state['name'])
     
     # Fallback: return first output

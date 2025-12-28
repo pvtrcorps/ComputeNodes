@@ -6,11 +6,23 @@ from ...ir.types import DataType
 
 
 def emit_constant(op, ctx):
-    """Emit constant value declaration."""
+    """Emit constant value declaration.
+    
+    Skips auto-sampling placeholders (0.5, 0.5) that are used only for
+    cross-pass UV coordination and never actually referenced in shader code.
+    """
     lhs = ctx['lhs']
     type_str = ctx['type_str']
     
     val = op.attrs.get('value')
+    
+    # Skip auto-sampling placeholders to avoid unused variables
+    # These are created during graph extraction for cross-pass UV coordination
+    # but replaced with inline expressions during emission
+    # NOTE: Only skip (0.5, 0.5) family - (0.0, 0.0, 0.0) are legitimate defaults!
+    if val in [(0.5, 0.5), (0.5, 0.5, 0.5)]:
+        return ""  # Don't emit - will be inlined when actually used
+    
     s_val = ""
     
     # Handle Vector types

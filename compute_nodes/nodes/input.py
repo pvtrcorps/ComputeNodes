@@ -68,4 +68,21 @@ class ComputeNodeImageInfo(ComputeNode):
         return self.bl_label
 
 
+class ComputeNodeValue(ComputeNode):
+    """Output a constant float value."""
+    bl_idname = 'ComputeNodeValue'
+    bl_label = 'Value'
+    bl_icon = 'DRIVER'
+    node_category = "INPUT"
+    
+    def init(self, context):
+        self.apply_node_color()
+        # Output: Float value
+        self.outputs.new('NodeSocketFloat', "Value").default_value = 0.5
+        
+    def draw_label(self):
+        self._draw_node_color()
+        return self.bl_label
+
+
 

@@ -202,10 +202,14 @@ class ShaderGenerator:
         
         if emitter is not None:
             result = emitter(op, ctx)
+            
+            # If emitter returns empty string, skip entire operation
+            # (e.g., placeholder constants that should not be emitted)
+            if result == "":
+                return ""
+            
             if callable(result):
                 return result
             return result
         
         return f"    // Op {op.opcode.name} not implemented"
-
-

@@ -130,17 +130,32 @@ A **GPU compute node system** for Blender that lets users describe image/volume 
 | **OutputImage** | External data sink |
 | **Viewer** | Debug visualization |
 
-### 4.3 NOT Native (Should Be Node Groups)
+### 4.3 Control Flow
 
-| Operation | Why Node Group |
-|-----------|---------------|
-| Gradient | = Sample(x±1) + Math |
-| Divergence | = Sample + Math |
-| Curl | = Sample + Math |
-| Blur | = Sample(kernel) + Math |
-| Sharpen | = Sample + Math |
-| Edge Detect | = Sample + Math |
-| Distort | = Sample(offset UV) |
+| Node | Why it's primitive |
+|------|-------------------|
+| **Repeat Zone** | Multi-iteration execution (Grid state only) |
+
+**Important: Repeat Zones only accept Grid state**
+
+Due to the multi-pass GPU architecture, repeat zones can only pass Grid buffers between iterations via ping-pong buffering. Fields and scalar values cannot be serialized between separate shader programs.
+
+```
+✅ Correct Usage:
+Noise → Capture → Repeat Input → Sample → Process → Capture → Repeat Output
+
+❌ Incorrect Usage:
+Noise → Repeat Input  (Field cannot pass between shader iterations)
+Float → Repeat Input  (Scalar cannot pass between shader iterations)
+```
+
+**Why this limitation exists:**
+- Each loop iteration runs as a **completely separate GPU shader**
+- Grids use ping-pong buffers (img_0 ↔ img_1) to pass data between shaders
+- Fields/scalars have no serialization mechanism between independent shaders
+- This is fundamentally different from Blender's Geometry Nodes which runs in a unified CPU/GPU context
+
+**Best Practice:** Always use Capture before Repeat Input to materialize Fields into Grids.
 
 ---
 
