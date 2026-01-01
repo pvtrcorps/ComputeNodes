@@ -12,20 +12,11 @@ from ...ir.graph import _trace_resource_index
 def handle_output_image(node, ctx):
     """
     Handle ComputeNodeOutputImage node.
-    
     Grid Architecture:
     - Input MUST be a GRID (HANDLE type)
     - Resolution is INHERITED from the input grid
-    
-    Save Modes:
-    - DATABLOCK: Keep in Blender memory
-    - SAVE: Write to file after execution
-    - PACK: Pack into .blend file
     """
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    get_socket_value = ctx['get_socket_value']
+    builder = ctx.builder
     
     import logging
     logger = logging.getLogger(__name__)
@@ -38,8 +29,7 @@ def handle_output_image(node, ctx):
     file_format = getattr(node, 'file_format', 'OPEN_EXR')
     
     # Get input data
-    data_socket = node.inputs[0]  # "Grid" socket
-    val_data = get_socket_value(data_socket)
+    val_data = ctx.get_input(0)
     
     if val_data is None:
         logger.warning(f"Output Image '{node.name}': No grid connected")

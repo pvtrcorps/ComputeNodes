@@ -1,11 +1,5 @@
 # Node Groups Handler
 # Handles: ComputeNodeGroup, ComputeNodeGroupInput, ComputeNodeGroupOutput
-#
-# Strategy for recursive group evaluation:
-# 1. When ComputeNodeGroup is processed, we find GroupInput/GroupOutput in the inner tree
-# 2. Map outer inputs → GroupInput's outputs (in socket_value_map with inner socket keys)
-# 3. Process by asking for GroupOutput's input values (recursive traversal of inner tree)
-# 4. Map GroupOutput's inputs → outer outputs
 
 from ...ir.types import DataType
 
@@ -15,17 +9,9 @@ from ...ir.types import DataType
 def handle_nodegroup(node, ctx):
     """
     Handle ComputeNodeGroup - recursively extract the referenced tree.
-    
-    This is complex because we need to:
-    1. Map the outer node's inputs to the inner tree's GroupInput outputs
-    2. Recursively process the inner tree's nodes
-    3. Return the inner tree's GroupOutput input values as our outputs
     """
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    get_socket_value = ctx['get_socket_value']
-    output_socket_needed = ctx.get('output_socket_needed')
+    builder = ctx.builder
+    output_socket_needed = ctx.extra.get('output_socket_needed')
     
     inner_tree = node.node_tree
     if not inner_tree:
@@ -53,13 +39,18 @@ def handle_nodegroup(node, ctx):
             if i < len(group_input.outputs):
                 inner_socket = group_input.outputs[i]
                 # Get the value from outer connection
-                outer_value = get_socket_value(outer_socket)
+                outer_value = ctx.get_input(outer_socket.name) # Using name lookup on outer node
+                # Or better (more consistent with core):
+                # out_val = ctx._get_socket_value(outer_socket) 
+                # But NodeContext.get_input handles name or index.
+                # Let's use get_input with index which is safer for order
+                outer_value = ctx.get_input(i)
+
                 if outer_value is not None:
-                    inner_key = get_socket_key(inner_socket)
-                    socket_value_map[inner_key] = outer_value
+                    inner_key = ctx._get_socket_key(inner_socket)
+                    ctx._socket_value_map[inner_key] = outer_value
     
     # Step 2: Process inner tree by getting GroupOutput's input values
-    # This will recursively traverse the inner tree
     result_values = []
     
     for i, inner_socket in enumerate(group_output.inputs):
@@ -70,29 +61,30 @@ def handle_nodegroup(node, ctx):
             from_node = link.from_node
             
             # Check if we already have this value
-            from_key = get_socket_key(from_socket)
-            if from_key in socket_value_map:
-                val = socket_value_map[from_key]
+            from_key = ctx._get_socket_key(from_socket)
+            if from_key in ctx._socket_value_map:
+                val = ctx._socket_value_map[from_key]
             else:
                 # Need to process the inner node
-                # Use the inner node's handler - import here to avoid circular import
                 from ..registry import get_handler
                 handler = get_handler(from_node.bl_idname)
                 if handler:
-                    inner_ctx = {
-                        'builder': builder,
-                        'socket_value_map': socket_value_map,
-                        'get_socket_key': get_socket_key,
-                        'get_socket_value': get_socket_value,
-                        'output_socket_needed': from_socket,
-                    }
+                    # Create valid NodeContext for inner node
+                    # We reuse the SAME socket_value_map to share values across group boundaries
+                    # This is key for efficient processing (memoization works globally)
+                    from ..node_context import NodeContext
+                    inner_ctx = NodeContext(
+                        builder=builder,
+                        node=from_node,
+                        socket_value_map=ctx._socket_value_map,
+                        get_socket_key=ctx._get_socket_key,
+                        get_socket_value=ctx._get_socket_value,
+                        extra_ctx={'output_socket_needed': from_socket}
+                    )
+                    
                     handler(from_node, inner_ctx)
                     
-                    # After handler executes, check if the socket value was stored
-                    # NOTE: Don't use the return value! Multi-output handlers store
-                    # all outputs in socket_value_map but return only one value.
-                    # The correct value is already stored with from_key.
-                    val = socket_value_map.get(from_key)
+                    val = ctx._socket_value_map.get(from_key)
                 else:
                     val = None
             
@@ -100,8 +92,8 @@ def handle_nodegroup(node, ctx):
             
             # Map to outer output socket
             if i < len(node.outputs):
-                outer_output_key = get_socket_key(node.outputs[i])
-                socket_value_map[outer_output_key] = val
+                outer_output_key = ctx._get_socket_key(node.outputs[i])
+                ctx._socket_value_map[outer_output_key] = val
         else:
             # Not linked - use default value if any
             if hasattr(inner_socket, 'default_value'):
@@ -112,8 +104,8 @@ def handle_nodegroup(node, ctx):
                 result_values.append(val)
                 
                 if i < len(node.outputs):
-                    outer_output_key = get_socket_key(node.outputs[i])
-                    socket_value_map[outer_output_key] = val
+                    outer_output_key = ctx._get_socket_key(node.outputs[i])
+                    ctx._socket_value_map[outer_output_key] = val
             else:
                 result_values.append(None)
     
@@ -130,29 +122,21 @@ def handle_nodegroup(node, ctx):
 def handle_group_input(node, ctx):
     """
     Handle ComputeNodeGroupInput.
-    
-    This node doesn't compute anything itself - its output values
-    are populated by the parent ComputeNodeGroup handler when it
-    maps outer inputs to inner GroupInput outputs.
-    
-    If we reach here, it means we need to return the pre-mapped values.
     """
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    output_socket_needed = ctx.get('output_socket_needed')
+    output_socket_needed = ctx.extra.get('output_socket_needed')
     
     # Return the value for the requested output socket
     # These should have been set by the parent NodeGroup handler
     if output_socket_needed:
-        key = get_socket_key(output_socket_needed)
-        if key in socket_value_map:
-            return socket_value_map[key]
+        key = ctx._get_socket_key(output_socket_needed)
+        if key in ctx._socket_value_map:
+            return ctx._socket_value_map[key]
     
     # If no specific output requested, try first output
     if node.outputs:
-        key = get_socket_key(node.outputs[0])
-        if key in socket_value_map:
-            return socket_value_map[key]
+        key = ctx._get_socket_key(node.outputs[0])
+        if key in ctx._socket_value_map:
+            return ctx._socket_value_map[key]
     
     return None
 
@@ -160,14 +144,8 @@ def handle_group_input(node, ctx):
 def handle_group_output(node, ctx):
     """
     Handle ComputeNodeGroupOutput.
-    
-    This node collects inputs and marks them as the group's outputs.
-    It doesn't produce any output values itself - the values flow
-    from connected nodes through its inputs.
-    
-    The actual output mapping is handled by handle_nodegroup when
-    it reads the GroupOutput's input connections.
     """
     # GroupOutput doesn't need to do anything here
     # Its inputs are read directly by handle_nodegroup
     return None
+

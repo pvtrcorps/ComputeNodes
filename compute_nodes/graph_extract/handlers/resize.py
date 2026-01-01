@@ -10,27 +10,17 @@ from ...ir.types import DataType
 def handle_resize(node, ctx):
     """
     Handle ComputeNodeResize node.
-    
     Grid Architecture:
     - Input MUST be a GRID (HANDLE type)
     - Output is a new grid at target resolution
-    - Supports 2D and 3D grids
-    
-    Dynamic Resolution:
-    - If Width/Height sockets are connected to non-constant values,
-      the resource is marked as dynamic_size=True
-    - The executor will evaluate size_expression at runtime
     """
-    builder = ctx['builder']
-    get_socket_value = ctx['get_socket_value']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
+    builder = ctx.builder
     
     import logging
     logger = logging.getLogger(__name__)
     
     # Get input value
-    val_input = get_socket_value(node.inputs[0])
+    val_input = ctx.get_input(0)
     
     if val_input is None:
         logger.warning(f"Resize node '{node.name}': No grid connected")
@@ -48,30 +38,23 @@ def handle_resize(node, ctx):
     def get_size_info(socket_name, default):
         """
         Get size information from socket.
-        Returns (value, is_dynamic, expression)
-        - value: integer to use for static allocation
-        - is_dynamic: True if value is computed at runtime
-        - expression: Value object for runtime evaluation (or None)
         """
         if socket_name not in node.inputs:
             return default, False, None
         
         socket = node.inputs[socket_name]
-        if not socket.is_linked:
-            return int(socket.default_value), False, None
         
-        # Socket is connected - get the Value
-        val = get_socket_value(socket)
+        # Using ctx to get linked value
+        val = ctx.get_input(socket_name)
+        
         if val is None:
             return int(socket.default_value), False, None
         
         # Check if it's a constant
         if val.origin and hasattr(val.origin, 'attrs') and 'value' in val.origin.attrs:
-            # It's a CONSTANT op - extract static value
             return int(val.origin.attrs['value']), False, None
         
-        # It's a dynamic value (not constant) - mark as dynamic
-        # Use socket default as fallback size, but store expression for runtime
+        # It's a dynamic value
         logger.info(f"Resize '{node.name}': {socket_name} is dynamic (non-constant)")
         return int(socket.default_value), True, val
     
@@ -131,9 +114,8 @@ def handle_resize(node, ctx):
         
     else:
         # 2D: Manual Bilinear Interpolation using texelFetch
-        # This is robust against sampler types (Rect vs 2D) and avoids Zoom artifacts
-        
-        # 1. Get Texture Size using IMAGE_SIZE OpCode (maps to textureSize for samplers)
+        # ... (same interpolation logic) ...
+        # 1. Get Texture Size using IMAGE_SIZE OpCode
         val_ts = builder.emit(OpCode.IMAGE_SIZE, [val_input], DataType.IVEC2)
         val_ts_f = builder.cast(val_ts, DataType.VEC2)
         
@@ -172,8 +154,6 @@ def handle_resize(node, ctx):
         def emit_clamped_fetch(coord_val):
             # clamp(coord, 0, size-1)
             val_clamped = builder.emit(OpCode.CLAMP, [coord_val, val_zero, val_sub_one], DataType.IVEC2)
-            
-            # Fetch using IMAGE_LOAD (maps to texelFetch for valid samplers)
             return builder.image_load(val_input, val_clamped)
 
         val_tex_bl = emit_clamped_fetch(val_coord_i)
@@ -182,7 +162,6 @@ def handle_resize(node, ctx):
         val_tex_tr = emit_clamped_fetch(val_idx_tr)
         
         # 6. Bilinear Mix using MIX OpCode
-        # mix(mix(bl, br, f.x), mix(tl, tr, f.x), f.y)
         val_fx = builder.swizzle(val_uv_f, "x")
         val_fy = builder.swizzle(val_uv_f, "y")
         
@@ -204,8 +183,7 @@ def handle_resize(node, ctx):
         builder.image_store(val_output, val_coord, val_sampled)
     
     # Store output in socket map
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val_output
+    ctx.set_output(0, val_output)
     
     return val_output
 

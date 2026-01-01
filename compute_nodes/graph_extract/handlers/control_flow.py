@@ -1,5 +1,5 @@
 # Control Flow Node Handlers
-# Handles: ComputeNodePosition, ComputeNodeSwitch, ComputeNodeMix, ComputeNodeRepeatOutput, ComputeNodeRepeatInput
+# Handles: ComputeNodePosition, ComputeNodeSwitch, ComputeNodeMix
 
 from typing import Optional, Any
 from ...ir.graph import ValueKind
@@ -19,17 +19,14 @@ def handle_position(node, ctx):
     For 2D dispatches (depth=1), Z will be 0/1 = 0.
     For 3D dispatches, Z will be properly normalized.
     """
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    output_socket_needed = ctx.get('output_socket_needed')
+    builder = ctx.builder
+    output_socket_needed = ctx.extra.get('output_socket_needed')
     
     # Builtin: gl_GlobalInvocationID -> uvec3
     val_gid = builder.builtin("gl_GlobalInvocationID", DataType.UVEC3)
     val_pos = builder.cast(val_gid, DataType.VEC3)
     
-    out_key = get_socket_key(node.outputs[0])  # "Coordinate"
-    socket_value_map[out_key] = val_pos
+    ctx.set_output(0, val_pos)  # "Coordinate"
 
     # Normalized Output using u_dispatch uniforms (all 3 dimensions)
     if len(node.outputs) > 1:
@@ -68,8 +65,7 @@ def handle_position(node, ctx):
         val_norm = builder._new_value(ValueKind.SSA, DataType.VEC3, origin=op_div)
         op_div.add_output(val_norm)
         
-        out_key_norm = get_socket_key(node.outputs[1])
-        socket_value_map[out_key_norm] = val_norm
+        ctx.set_output(1, val_norm)
 
 
     # Global Index Output
@@ -96,28 +92,23 @@ def handle_position(node, ctx):
         
         val_idx_int = builder.cast(val_idx_uint, DataType.INT)
         
-        out_key_idx = get_socket_key(node.outputs[2])
-        socket_value_map[out_key_idx] = val_idx_int
+        ctx.set_output(2, val_idx_int)
 
     if output_socket_needed:
-        req_key = get_socket_key(output_socket_needed)
-        if req_key in socket_value_map:
-            return socket_value_map[req_key]
+        req_key = ctx._get_socket_key(output_socket_needed)
+        if req_key in ctx._socket_value_map:
+            return ctx._socket_value_map[req_key]
     return val_pos
 
 
 def handle_switch(node, ctx):
     """Handle ComputeNodeSwitch node (If/Else)."""
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    get_socket_value = ctx['get_socket_value']
+    builder = ctx.builder
     
-    val_sw = get_socket_value(node.inputs[0])
-    val_false = get_socket_value(node.inputs[1])
-    val_true = get_socket_value(node.inputs[2])
+    val_sw = ctx.input_float(0, default=0.0)
+    val_false = ctx.get_input(1)
+    val_true = ctx.get_input(2)
     
-    if val_sw is None: val_sw = builder.constant(0.0, DataType.FLOAT)
     if val_false is None: val_false = builder.constant(0.0, DataType.FLOAT)
     if val_true is None: val_true = builder.constant(0.0, DataType.FLOAT)
     
@@ -133,23 +124,18 @@ def handle_switch(node, ctx):
     val_res = builder._new_value(ValueKind.SSA, target_type, origin=op)
     op.add_output(val_res)
     
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val_res
+    ctx.set_output(0, val_res)
     return val_res
 
 
 def handle_mix(node, ctx):
     """Handle ComputeNodeMix node."""
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    get_socket_value = ctx['get_socket_value']
+    builder = ctx.builder
     
-    val_fac = get_socket_value(node.inputs[0])
-    val_a = get_socket_value(node.inputs[1])
-    val_b = get_socket_value(node.inputs[2])
+    val_fac = ctx.input_float(0, default=0.5)
+    val_a = ctx.get_input(1)
+    val_b = ctx.get_input(2)
     
-    if val_fac is None: val_fac = builder.constant(0.5, DataType.FLOAT)
     if val_a is None: val_a = builder.constant(0.0, DataType.FLOAT)
     if val_b is None: val_b = builder.constant(0.0, DataType.FLOAT)
     
@@ -188,89 +174,5 @@ def handle_mix(node, ctx):
     val_res = builder._new_value(ValueKind.SSA, target_type, origin=op_mix)
     op_mix.add_output(val_res)
     
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val_res
+    ctx.set_output(0, val_res)
     return val_res
-
-
-def handle_repeat_output(node, ctx):
-    """Handle ComputeNodeRepeatOutput node (Repeat Zone End)."""
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    get_socket_value = ctx['get_socket_value']
-    
-    def find_repeat_input(start_socket) -> Optional[Any]:
-        stack = [start_socket]
-        visited = set()
-        while stack:
-            sock = stack.pop()
-            if sock in visited: continue
-            visited.add(sock)
-            
-            if sock.is_linked:
-                link = sock.links[0]
-                nd = link.from_node
-                if nd.bl_idname == 'ComputeNodeRepeatInput':
-                    return nd
-                for inp in nd.inputs:
-                    stack.append(inp)
-        return None
-
-    repeat_input_node = find_repeat_input(node.inputs[0])
-    
-    if not repeat_input_node:
-        import logging
-        logging.getLogger(__name__).warning(f"Repeat Output {node.name} has no upstream Repeat Input connected.")
-        return builder.constant(0.0, DataType.FLOAT)
-    
-    val_iters = get_socket_value(repeat_input_node.inputs[0])
-    val_init = get_socket_value(repeat_input_node.inputs[1])
-    
-    if val_iters is None: val_iters = builder.constant(1, DataType.INT)
-    if val_init is None: val_init = builder.constant(0.0, DataType.FLOAT)
-    
-    val_iters = builder.cast(val_iters, DataType.INT)
-    val_init = builder.cast(val_init, DataType.FLOAT)
-    
-    op_start = builder.add_op(OpCode.LOOP_START, [val_iters, val_init])
-    val_curr = builder._new_value(ValueKind.SSA, DataType.FLOAT, origin=op_start)
-    op_start.add_output(val_curr)
-    
-    val_idx = builder._new_value(ValueKind.SSA, DataType.INT, origin=op_start)
-    op_start.add_output(val_idx)
-    
-    key_iter = get_socket_key(repeat_input_node.outputs[0])
-    key_curr = get_socket_key(repeat_input_node.outputs[1])
-    
-    socket_value_map[key_iter] = val_idx
-    socket_value_map[key_curr] = val_curr
-    
-    val_next = get_socket_value(node.inputs[0])
-    
-    if val_next is None:
-        val_next = val_curr
-        
-    val_next = builder.cast(val_next, DataType.FLOAT)
-    
-    op_end = builder.add_op(OpCode.LOOP_END, [val_next, val_curr])
-    val_final = builder._new_value(ValueKind.SSA, DataType.FLOAT, origin=op_end)
-    op_end.add_output(val_final)
-    
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val_final
-    
-    return val_final
-
-
-def handle_repeat_input(node, ctx):
-    """Handle ComputeNodeRepeatInput node (Repeat Zone Start)."""
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    
-    key_curr = get_socket_key(node.outputs[1])
-    if key_curr in socket_value_map:
-        return socket_value_map[key_curr]
-        
-    return builder.constant(0.0, DataType.FLOAT)

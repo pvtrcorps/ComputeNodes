@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 
 @contextmanager
-def grid_field_context(ctx: Dict[str, Any], grid_value: Any):
+def grid_field_context(ctx: Any, grid_value: Any):
     """
     Context manager that pushes grid context for field input processing.
     
@@ -37,7 +37,14 @@ def grid_field_context(ctx: Dict[str, Any], grid_value: Any):
         yield ctx
         return
     
-    graph = ctx.get('graph')
+    # Handle NodeContext object vs dict
+    if hasattr(ctx, 'graph'):
+        graph = ctx.graph
+        storage = ctx.extra
+    else:
+        graph = ctx.get('graph')
+        storage = ctx
+    
     if graph is None or resource_index >= len(graph.resources):
         yield ctx
         return
@@ -47,10 +54,10 @@ def grid_field_context(ctx: Dict[str, Any], grid_value: Any):
     size = getattr(resource, 'size', None)
     
     # Save old context
-    old_context = ctx.get('sample_grid_context')
+    old_context = storage.get('sample_grid_context')
     
     # Push new context
-    ctx['sample_grid_context'] = {
+    storage['sample_grid_context'] = {
         'dimensions': dimensions,  # 1, 2, or 3
         'size': size,              # (w,) or (w,h) or (w,h,d)
     }
@@ -59,10 +66,10 @@ def grid_field_context(ctx: Dict[str, Any], grid_value: Any):
         yield ctx
     finally:
         # Restore old context
-        ctx['sample_grid_context'] = old_context
+        storage['sample_grid_context'] = old_context
 
 
-def get_grid_dimensions(ctx: Dict[str, Any], grid_value: Any) -> tuple:
+def get_grid_dimensions(ctx: Any, grid_value: Any) -> tuple:
     """
     Get dimensions and size from a grid value.
     
@@ -76,7 +83,12 @@ def get_grid_dimensions(ctx: Dict[str, Any], grid_value: Any) -> tuple:
     if resource_index is None:
         return (2, None)
     
-    graph = ctx.get('graph')
+    # Handle NodeContext object vs dict
+    if hasattr(ctx, 'graph'):
+        graph = ctx.graph
+    else:
+        graph = ctx.get('graph')
+    
     if graph is None or resource_index >= len(graph.resources):
         return (2, None)
     

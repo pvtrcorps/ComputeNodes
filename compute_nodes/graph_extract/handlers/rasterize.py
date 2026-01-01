@@ -10,29 +10,16 @@ from ...ir.types import DataType
 def handle_capture(node, ctx):
     """
     Handle ComputeNodeCapture node.
-    
     Captures (materializes) a Field to a Grid at the specified resolution.
-    This is the fundamental operation that converts lazy procedural data
-    into concrete data that can be sampled at arbitrary coordinates.
-    
-    Grid Architecture:
-    - Grid2D: width x height (dim_mode == '2D')
-    - Grid3D: width x height x depth (dim_mode == '3D')
-    
-    Resolution can be:
-    - Static: Socket default values or constant connections
-    - Dynamic: Non-constant connected values (e.g., from GridInfo, loop iteration)
     """
-    builder = ctx['builder']
-    get_socket_value = ctx['get_socket_value']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
+    builder = ctx.builder
     
     import logging
     logger = logging.getLogger(__name__)
     
     # Get input value (Field)
-    val_input = get_socket_value(node.inputs['Field'])
+    # Using 'Field' key from inputs
+    val_input = ctx.get_input('Field')
     
     if val_input is None:
         # Default to black if nothing connected
@@ -46,20 +33,17 @@ def handle_capture(node, ctx):
         """
         Get size information from socket.
         Returns (value, is_dynamic, expression)
-        - value: integer to use for static allocation
-        - is_dynamic: True if value is computed at runtime
-        - expression: Value object for runtime evaluation (or None)
         """
         if socket_name not in node.inputs:
             return default, False, None
         
         socket = node.inputs[socket_name]
-        if not socket.is_linked:
-            return int(socket.default_value), False, None
         
-        # Socket is connected - get the Value
-        val = get_socket_value(socket)
+        # Using ctx to get linked value
+        val = ctx.get_input(socket_name)
+        
         if val is None:
+            # Not linked or no value, use default
             return int(socket.default_value), False, None
         
         # Check if it's a constant
@@ -67,16 +51,14 @@ def handle_capture(node, ctx):
             # It's a CONSTANT op - extract static value
             return int(val.origin.attrs['value']), False, None
         
-        # Check if it comes from IMAGE_SIZE - we can extract static size from the resource
+        # Check if it comes from IMAGE_SIZE
         if val.origin and val.origin.opcode == OpCode.IMAGE_SIZE:
-            # Get the input image handle
             img_input = val.origin.inputs[0] if val.origin.inputs else None
             if img_input and img_input.resource_index is not None:
                 graph = builder.graph
                 if img_input.resource_index < len(graph.resources):
                     res = graph.resources[img_input.resource_index]
                     if hasattr(res, 'size') and res.size:
-                        # For direct IMAGE_SIZE output (IVEC3) use name to guess component
                         if socket_name == 'Width' and len(res.size) > 0:
                             return res.size[0], False, None
                         elif socket_name == 'Height' and len(res.size) > 1:
@@ -93,15 +75,13 @@ def handle_capture(node, ctx):
                     if img_input.resource_index < len(graph.resources):
                         res = graph.resources[img_input.resource_index]
                         if hasattr(res, 'size') and res.size:
-                            # Get swizzle mask (e.g., 'x', 'y', 'z')
                             mask = val.origin.attrs.get('mask', 'x')
                             idx = {'x': 0, 'y': 1, 'z': 2}.get(mask, 0)
                             if idx < len(res.size):
                                 logger.info(f"Capture '{node.name}': Extracted {socket_name}={res.size[idx]} from Grid Info")
                                 return res.size[idx], False, None
         
-        # It's a dynamic value (not constant) - mark as dynamic
-        # Use socket default as fallback size, but store expression for runtime
+        # It's a dynamic value
         logger.info(f"Capture '{node.name}': {socket_name} is dynamic (non-constant)")
         return int(socket.default_value), True, val
     
@@ -151,7 +131,6 @@ def handle_capture(node, ctx):
         val_input = builder.cast(val_input, DataType.VEC4)
     elif val_input.type == DataType.HANDLE:
         # Input is already a Grid - sample it at current position
-        # This allows chaining: Grid -> Capture (resize equivalent)
         val_gid = builder.builtin("gl_GlobalInvocationID", DataType.UVEC3)
         if is_3d:
             val_coord_ivec = builder.cast(val_gid, DataType.IVEC3)
@@ -172,8 +151,7 @@ def handle_capture(node, ctx):
     builder.image_store(val_output, val_coord_ivec, val_input)
     
     # Store output in socket map
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val_output
+    ctx.set_output(0, val_output)
     
     return val_output
 

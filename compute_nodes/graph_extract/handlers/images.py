@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 
 def handle_image_input(node, ctx):
     """Handle ComputeNodeImageInput node."""
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
+    builder = ctx.builder
     
     img = node.image
     if not img:
@@ -25,16 +23,13 @@ def handle_image_input(node, ctx):
         desc = ImageDesc(name=img.name, access=ResourceAccess.READ, format=fmt)
         val = builder.add_resource(desc)
     
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val
+    ctx.set_output(0, val)
     return val
 
 
 def handle_image_write(node, ctx):
     """Handle ComputeNodeImageWrite node."""
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
+    builder = ctx.builder
     
     img = node.image
     if not img:
@@ -44,19 +39,15 @@ def handle_image_write(node, ctx):
         desc = ImageDesc(name=img.name, access=ResourceAccess.WRITE, format=fmt)
         val = builder.add_resource(desc)
     
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val
+    ctx.set_output(0, val)
     return val
 
 
 def handle_image_info(node, ctx):
     """Handle ComputeNodeImageInfo node - returns separate width, height, depth, and dimensionality."""
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    get_socket_value = ctx['get_socket_value']
+    builder = ctx.builder
     
-    val_img = get_socket_value(node.inputs[0])
+    val_img = ctx.get_input(0)
     
     if not val_img:
         # No input: return zeros
@@ -87,17 +78,10 @@ def handle_image_info(node, ctx):
             val_dims = builder.constant(2, DataType.INT)
     
     # Map outputs: Width, Height, Depth, Dimensionality
-    socket_value_map[get_socket_key(node.outputs[0])] = val_width
-    socket_value_map[get_socket_key(node.outputs[1])] = val_height
-    socket_value_map[get_socket_key(node.outputs[2])] = val_depth
-    socket_value_map[get_socket_key(node.outputs[3])] = val_dims
-    
-    # Return the requested output socket's value if specified
-    output_socket_needed = ctx.get('output_socket_needed')
-    if output_socket_needed:
-        for i, out_sock in enumerate(node.outputs):
-            if out_sock == output_socket_needed:
-                return [val_width, val_height, val_depth, val_dims][i]
+    ctx.set_output(0, val_width)
+    ctx.set_output(1, val_height)
+    ctx.set_output(2, val_depth)
+    ctx.set_output(3, val_dims)
     
     return val_width
 
@@ -105,29 +89,11 @@ def handle_image_info(node, ctx):
 def handle_sample(node, ctx):
     """
     Handle ComputeNodeSample node - texture sampling with bilinear filtering.
-    
-    Generates IR for sampling from 2D or 3D textures using normalized UV coords (0-1).
-    
-    Dimension Handling:
-        - Detects target texture dimensionality from the resource descriptor
-        - VEC3 coords preserved when sampling from 3D textures
-        - VEC3 coords flattened to XY when sampling from 2D textures
-        - VEC2 coords extended with Z=0.5 when sampling from 3D textures
-    
-    Args:
-        node: The ComputeNodeSample Blender node
-        ctx: Handler context with builder, socket_value_map, etc.
-    
-    Returns:
-        Value representing the sampled RGBA result (VEC4)
     """
-    builder = ctx['builder']
-    socket_value_map = ctx['socket_value_map']
-    get_socket_key = ctx['get_socket_key']
-    get_socket_value = ctx['get_socket_value']
+    builder = ctx.builder
     
-    val_img = get_socket_value(node.inputs[0])  # Texture
-    val_coord = get_socket_value(node.inputs[1])  # Coordinate
+    val_img = ctx.get_input(0)  # Texture
+    val_coord = ctx.get_input(1)  # Coordinate
     
     if val_img is None:
         val_out = builder.constant((0.0, 0.0, 0.0, 0.0), DataType.VEC4)
@@ -169,7 +135,6 @@ def handle_sample(node, ctx):
             elif val_coord.type == DataType.IVEC3:
                 val_coord = builder.cast(val_coord, DataType.VEC3)
             elif val_coord.type not in (DataType.VEC3, DataType.VEC4):
-                # Cast other types to VEC3
                 val_coord = builder.cast(val_coord, DataType.VEC3)
             # VEC3 is preserved as-is
         else:
@@ -185,7 +150,5 @@ def handle_sample(node, ctx):
         # Use sample() for texture() - enables bilinear filtering
         val_out = builder.sample(val_img, val_coord)
     
-    out_key = get_socket_key(node.outputs[0])
-    socket_value_map[out_key] = val_out
+    ctx.set_output(0, val_out)
     return val_out
-

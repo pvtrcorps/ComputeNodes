@@ -14,16 +14,15 @@ def handle_viewer(node, ctx):
     - Creates internal GPU texture (no CPU readback)
     - Stores texture reference for draw handler display
     """
-    builder = ctx['builder']
-    get_socket_value = ctx['get_socket_value']
+    builder = ctx.builder
     
     import logging
     logger = logging.getLogger(__name__)
     
-    # Get Grid input
+    # Get Grid input using NodeContext
     val_data = None
     if node.inputs[0].is_linked:
-        val_data = get_socket_value(node.inputs[0])
+        val_data = ctx.get_input(0)
     
     if val_data is None:
         logger.warning(f"Viewer '{node.name}': No input connected")

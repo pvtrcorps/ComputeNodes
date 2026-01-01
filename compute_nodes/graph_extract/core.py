@@ -139,46 +139,62 @@ def extract_graph(nodetree) -> Graph:
             # Unlinked non-value socket
             return None 
 
-    def process_node(node, output_socket_needed=None) -> Value:
-        """Process a node using the handler registry."""
-        node_key = get_node_key(node)
-        if node_key in recursion_stack:
-            raise RecursionError(f"Cycle detected at node {node.name}")
+    from .node_context import NodeContext
+    
+    def process_node(node, out_socket=None) -> Value:
+        """
+        Process a single node and return the value for the requested output socket.
+        """
+        key_node = get_node_key(node)
         
-        recursion_stack.add(node_key)
+        # Cycle detection
+        if key_node in recursion_stack:
+            # Check for Loop Input nodes - they break cycles by valid design
+            if node.bl_idname == 'ComputeNodeRepeatInput':
+                # Return whatever is available (likely None if not processed, but handled by pass splitting)
+                pass
+            else:
+                raise RecursionError(f"Cycle detected at node {node.name}")
+
+        recursion_stack.add(key_node)
         
         try:
-            # Look up handler in registry
             handler = get_handler(node.bl_idname)
-            
-            if handler is not None:
-                # Build context for handler
-                ctx = {
-                    'builder': builder,
-                    'socket_value_map': socket_value_map,
-                    'get_socket_key': get_socket_key,
-                    'get_socket_value': get_socket_value,
-                    'output_socket_needed': output_socket_needed,
-                }
-                return handler(node, ctx)
-            else:
-                # Unknown node type
-                logger.warning(f"Unknown node type: {node.bl_idname}")
+            if not handler:
+                logger.warning(f"No handler for {node.bl_idname}")
                 return None
-                
+            
+            # Create typed context
+            ctx = NodeContext(
+                builder=builder,
+                node=node,
+                socket_value_map=socket_value_map,
+                get_socket_key=get_socket_key,
+                get_socket_value=get_socket_value,
+                extra_ctx={'output_socket_needed': out_socket}
+            )
+            
+            # Execute handler
+            # Handlers execute side-effects (emit ops) and populate socket_value_map
+            result = handler(node, ctx)
+            
+            return result
+            
         finally:
-            recursion_stack.remove(node_key)
+            recursion_stack.remove(key_node)
 
     # Process all output nodes via their registered handlers
+    # Process all output nodes via their registered handlers
     for output_node in output_nodes:
-        # Build context for handler
-        ctx = {
-            'builder': builder,
-            'socket_value_map': socket_value_map,
-            'get_socket_key': get_socket_key,
-            'get_socket_value': get_socket_value,
-            'output_socket_needed': None,
-        }
+        # Create typed context for output handler
+        ctx = NodeContext(
+            builder=builder,
+            node=output_node,
+            socket_value_map=socket_value_map,
+            get_socket_key=get_socket_key,
+            get_socket_value=get_socket_value,
+            extra_ctx={'output_socket_needed': None}
+        )
         
         # Use the registered handler for output nodes
         handler = get_handler(output_node.bl_idname)
