@@ -79,7 +79,7 @@ def handle_repeat_output(node, ctx):
         
         # GRID-ONLY VALIDATION
         if not is_grid:
-            raise ValueError(
+            ctx.error(
                 f"Repeat zone state '{item.name}' must be a Grid (got {item.socket_type}).\n"
                 f"Multi-pass GPU loops cannot pass Fields or scalar values between iterations.\n"
                 f"Solution: Use Capture to convert Field → Grid before the loop."

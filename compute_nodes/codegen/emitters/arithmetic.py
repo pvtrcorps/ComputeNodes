@@ -3,21 +3,21 @@
 
 
 def emit_add(op, ctx):
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     return f"{lhs}{param(op.inputs[0])} + {param(op.inputs[1])};"
 
 
 def emit_sub(op, ctx):
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     return f"{lhs}{param(op.inputs[0])} - {param(op.inputs[1])};"
 
 
 def emit_mul(op, ctx):
     """Emit multiplication with inline type coercion for VEC4/VEC3 mismatches."""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     # Get operand representations
     a_str = param(op.inputs[0])
@@ -48,14 +48,14 @@ def emit_mul(op, ctx):
 
 
 def emit_div(op, ctx):
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     return f"{lhs}{param(op.inputs[0])} / {param(op.inputs[1])};"
 
 
 def emit_mod(op, ctx):
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     a = param(op.inputs[0])
     b = param(op.inputs[1])
     return f"{lhs}mod({a}, {b});"
@@ -63,15 +63,15 @@ def emit_mod(op, ctx):
 
 def emit_multiply_add(op, ctx):
     """a * b + c"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     return f"{lhs}{param(op.inputs[0])} * {param(op.inputs[1])} + {param(op.inputs[2])};"
 
 
 def emit_wrap(op, ctx):
     """wrap(val, min, max) = mod(val - min, max - min) + min"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     val = param(op.inputs[0])
     v_min = param(op.inputs[1])
     v_max = param(op.inputs[2])
@@ -80,15 +80,15 @@ def emit_wrap(op, ctx):
 
 def emit_snap(op, ctx):
     """floor(a / b) * b"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     return f"{lhs}floor({param(op.inputs[0])} / {param(op.inputs[1])}) * {param(op.inputs[1])};"
 
 
 def emit_pingpong(op, ctx):
     """Blender pingpong formula"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     a = param(op.inputs[0])
     b = param(op.inputs[1])
     return f"{lhs}({b} != 0.0) ? abs(fract({a} / ({b} * 2.0)) * {b} * 2.0 - {b}) : 0.0;"

@@ -11,8 +11,8 @@ def emit_constant(op, ctx):
     Skips auto-sampling placeholders (0.5, 0.5) that are used only for
     cross-pass UV coordination and never actually referenced in shader code.
     """
-    lhs = ctx['lhs']
-    type_str = ctx['type_str']
+    lhs = ctx.lhs
+    type_str = ctx.type_str
     
     val = op.attrs.get('value')
     
@@ -50,23 +50,23 @@ def emit_constant(op, ctx):
 
 def emit_builtin(op, ctx):
     """Emit builtin variable assignment."""
-    lhs = ctx['lhs']
+    lhs = ctx.lhs
     glsl_name = op.attrs.get('name')
     return f"{lhs}{glsl_name};"
 
 
 def emit_swizzle(op, ctx):
     """Emit swizzle operation."""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     mask = op.attrs.get('mask', 'xy')
     return f"{lhs}{param(op.inputs[0])}.{mask};"
 
 
 def emit_select(op, ctx):
     """Emit select/mix operation."""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     a = param(op.inputs[0])
     b = param(op.inputs[1])
     t = param(op.inputs[2])
@@ -75,9 +75,9 @@ def emit_select(op, ctx):
 
 def emit_cast(op, ctx):
     """Emit type cast operation with comprehensive Blender-matching behavior."""
-    lhs = ctx['lhs']
-    param = ctx['param']
-    type_str = ctx['type_str']
+    lhs = ctx.lhs
+    param = ctx.param
+    type_str = ctx.type_str
     
     target_type = type_str(op.outputs[0].type)
     src_val = op.inputs[0]

@@ -36,7 +36,12 @@ def _generate_shader_for_item(item, generator):
 def execute_compute_tree(tree, context):
     """Core execution logic for a Compute Node Tree"""
     try:
+        # Setup Logging
+        from .logger import setup_logger, log_info
+        setup_logger()  # Default to INFO
+        
         # 1. Extract Graph
+        log_info(f"Extracting graph from {tree.name}...")
         graph = extract_graph(tree)
         
         # 2. Analysis & Planning
@@ -107,10 +112,19 @@ class ComputeExecuteOperator(bpy.types.Operator):
             
         try:
             count = execute_compute_tree(tree, context)
+            
+            from .logger import log_info
+            log_info(f"Execution complete. Ran {count} passes.")
+            
             self.report({'INFO'}, f"Executed {count} passes.")
             return {'FINISHED'}
             
         except Exception as e:
+            from .logger import log_error
+            log_error(f"Execution Failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
             self.report({'ERROR'}, f"Execution Failed: {e}")
             return {'CANCELLED'}
 

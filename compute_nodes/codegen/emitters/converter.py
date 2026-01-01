@@ -7,8 +7,8 @@ def emit_separate_xyz(op, ctx):
     
     This operation has 3 outputs (x, y, z), so we emit multiple assignments.
     """
-    param = ctx['param']
-    type_str = ctx['type_str']
+    param = ctx.param
+    type_str = ctx.type_str
     
     vec = param(op.inputs[0])
     
@@ -27,8 +27,8 @@ def emit_separate_xyz(op, ctx):
 
 def emit_combine_xyz(op, ctx):
     """Emit combine XYZ operation - constructs vec3 from x, y, z."""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     x = param(op.inputs[0])
     y = param(op.inputs[1])
@@ -39,8 +39,8 @@ def emit_combine_xyz(op, ctx):
 
 def emit_combine_xy(op, ctx):
     """Emit combine XY operation - constructs vec2 from x, y."""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     x = param(op.inputs[0])
     y = param(op.inputs[1])
@@ -56,8 +56,8 @@ def emit_separate_color(op, ctx):
     - HSV: Convert to HSV then extract (h, s, v, a)
     - HSL: Convert to HSL then extract (h, s, l, a)
     """
-    param = ctx['param']
-    type_str = ctx['type_str']
+    param = ctx.param
+    type_str = ctx.type_str
     
     color = param(op.inputs[0])
     mode = op.attrs.get('mode', 'RGB')
@@ -107,8 +107,8 @@ def emit_combine_color(op, ctx):
     - HSV: Construct HSV then convert to RGB
     - HSL: Construct HSL then convert to RGB
     """
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     c0 = param(op.inputs[0])  # R/H
     c1 = param(op.inputs[1])  # G/S
@@ -130,8 +130,8 @@ def emit_combine_color(op, ctx):
 
 def emit_map_range(op, ctx):
     """Emit map range operation with various interpolation modes."""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     value = param(op.inputs[0])
     from_min = param(op.inputs[1])
@@ -183,8 +183,8 @@ def emit_map_range(op, ctx):
 
 def emit_clamp_range(op, ctx):
     """Emit clamp operation with MINMAX or RANGE mode."""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     value = param(op.inputs[0])
     min_val = param(op.inputs[1])

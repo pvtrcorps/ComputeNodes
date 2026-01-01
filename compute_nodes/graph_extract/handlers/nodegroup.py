@@ -73,13 +73,19 @@ def handle_nodegroup(node, ctx):
                     # We reuse the SAME socket_value_map to share values across group boundaries
                     # This is key for efficient processing (memoization works globally)
                     from ..node_context import NodeContext
+                    
+                    # Merge parent context with local requirements
+                    # Copy to avoid polluting parent context with child's output requirement
+                    new_extra = ctx.extra.copy()
+                    new_extra['output_socket_needed'] = from_socket
+                    
                     inner_ctx = NodeContext(
                         builder=builder,
                         node=from_node,
                         socket_value_map=ctx._socket_value_map,
                         get_socket_key=ctx._get_socket_key,
                         get_socket_value=ctx._get_socket_value,
-                        extra_ctx={'output_socket_needed': from_socket}
+                        extra_ctx=new_extra
                     )
                     
                     handler(from_node, inner_ctx)

@@ -4,8 +4,8 @@
 
 def emit_trig(func_name, op, ctx):
     """Emit trigonometric functions: sin, cos, tan, asin, acos, atan, atan2"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     if func_name == 'atan2':
         return f"{lhs}atan({param(op.inputs[0])}, {param(op.inputs[1])});"
@@ -15,15 +15,15 @@ def emit_trig(func_name, op, ctx):
 
 def emit_hyperbolic(func_name, op, ctx):
     """Emit hyperbolic functions: sinh, cosh, tanh"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     return f"{lhs}{func_name}({param(op.inputs[0])});"
 
 
 def emit_exp_log(func_name, op, ctx):
     """Emit exponential/logarithmic functions: pow, exp, log, sqrt, inversesqrt, radians, degrees"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     if func_name == 'pow':
         return f"{lhs}pow({param(op.inputs[0])}, {param(op.inputs[1])});"
@@ -33,15 +33,15 @@ def emit_exp_log(func_name, op, ctx):
 
 def emit_rounding(func_name, op, ctx):
     """Emit rounding functions: abs, sign, floor, ceil, fract, trunc, round"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     return f"{lhs}{func_name}({param(op.inputs[0])});"
 
 
 def emit_minmax(func_name, op, ctx):
     """Emit min/max functions: min, max, clamp"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     
     if func_name in ('clamp', 'mix'):
         return f"{lhs}{func_name}({param(op.inputs[0])}, {param(op.inputs[1])}, {param(op.inputs[2])});"
@@ -53,8 +53,8 @@ def emit_smooth(op, ctx):
     """Emit smooth min/max operations"""
     from ...ir.ops import OpCode
     
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     a = param(op.inputs[0])
     b = param(op.inputs[1])
     c = param(op.inputs[2])
@@ -69,8 +69,8 @@ def emit_smooth(op, ctx):
 
 def emit_compare(op, ctx):
     """Emit compare operation: (abs(a - b) <= max(c, 1e-5)) ? 1.0 : 0.0"""
-    lhs = ctx['lhs']
-    param = ctx['param']
+    lhs = ctx.lhs
+    param = ctx.param
     a = param(op.inputs[0])
     b = param(op.inputs[1])
     c = param(op.inputs[2])

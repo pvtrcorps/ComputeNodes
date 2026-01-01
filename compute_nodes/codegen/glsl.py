@@ -44,6 +44,9 @@ class ShaderGenerator:
         all_indices: List[int] = sorted(list(compute_pass.reads_idx | compute_pass.writes_idx))
         self._binding_map: Dict[int, int] = {res_idx: slot for slot, res_idx in enumerate(all_indices)}
         
+        from ..logger import log_debug
+        log_debug(f"Generating GLSL for pass (Ops: {len(compute_pass.ops)})...")
+        
         # 1. Generate main first to discover required GLSL functions
         main_section = self._generate_main(compute_pass)
         
@@ -205,11 +208,7 @@ class ShaderGenerator:
         if dispatch and hasattr(dispatch, 'ops'):
             current_op_ids = {id(op) for op in dispatch.ops}
         
-        ctx = {
-            'lhs': lhs,
-            'param': self._param,
-            'type_str': self._type_str,
-            'graph': self.graph,
+        dispatch_info = {
             'dispatch_size': dispatch_size,
             'op_ids': current_op_ids,
             # Pass-specific read/write info for sampler vs image detection
@@ -218,6 +217,9 @@ class ShaderGenerator:
             # Binding map for resource index -> sequential slot mapping
             'binding_map': self._binding_map,
         }
+        
+        from .shader_context import ShaderContext
+        ctx = ShaderContext(self, op, lhs, dispatch_info)
         
         emitter = get_emitter(op.opcode)
         

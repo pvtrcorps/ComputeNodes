@@ -25,6 +25,10 @@ def extract_graph(nodetree) -> Graph:
     Uses modular handlers for each node type.
     """
     graph = Graph(name=nodetree.name)
+    
+    from ..logger import log_debug
+    log_debug(f"Graph extraction started for '{nodetree.name}' ({len(nodetree.nodes)} nodes)")
+    
     builder = IRBuilder(graph)
     
     # Map: Socket Pointer (int) -> Value (SSA)

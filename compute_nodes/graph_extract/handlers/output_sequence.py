@@ -22,20 +22,8 @@ def handle_output_sequence(node, ctx):
     start_index = node.start_index
     color_depth = node.color_depth
     
-    # Get input data using NodeContext
-    val_data = ctx.get_input(0)  # "Grid" socket
-    
-    if val_data is None:
-        logger.warning(f"Output Sequence '{node.name}': No grid connected")
-        return None
-    
-    # VALIDATE: Input must be a GRID (HANDLE)
-    if val_data.type != DataType.HANDLE:
-        raise TypeError(
-            f"Output Sequence '{node.name}' requires a Grid input.\n"
-            f"Got: {val_data.type.name} (Field)\n"
-            f"Solution: Insert a Capture node before Output Sequence."
-        )
+    # Get input data using NodeContext validation
+    val_data = ctx.require_input(0, expected_type=DataType.HANDLE)  # "Grid" socket
     
     # Find source resource to get dimensions
     source_resource = None
@@ -43,14 +31,13 @@ def handle_output_sequence(node, ctx):
         source_resource = builder.graph.resources[val_data.resource_index]
     
     if source_resource is None:
-        raise ValueError(f"Output Sequence '{node.name}': Could not find input resource")
+        ctx.error(f"Could not find input resource for grid.")
     
     # VALIDATE: Must be 3D grid
     dims = getattr(source_resource, 'dimensions', 2)
     if dims != 3:
-        raise TypeError(
-            f"Output Sequence '{node.name}' requires a Grid3D input.\n"
-            f"Got: Grid{dims}D\n"
+        ctx.error(
+            f"Requires a Grid3D input. Got: Grid{dims}D\n"
             f"Solution: Use Capture with Dimensions='3D'."
         )
     

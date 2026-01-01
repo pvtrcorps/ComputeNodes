@@ -19,11 +19,26 @@ def handle_capture(node, ctx):
     
     # Get input value (Field)
     # Using 'Field' key from inputs
-    val_input = ctx.get_input('Field')
+    # Handles default (black) and casting to VEC4 automatically
+    val_input = ctx.input_vec4('Field', default=(0.0, 0.0, 0.0, 1.0))
     
-    if val_input is None:
-        # Default to black if nothing connected
-        val_input = builder.constant((0.0, 0.0, 0.0, 1.0), DataType.VEC4)
+    if val_input.type == DataType.HANDLE:
+         # Special case: If input is a Grid (HANDLE), we need to sample it explicitly
+         # input_vec4 might have cast it? No, input_vec4 checks type. 
+         # Wait, input_vec4 logic:
+         # if val.type != DataType.VEC4: return self.builder.cast(val, DataType.VEC4)
+         # If builder.cast handles HANDLE->VEC4 (via sampling?), we are good.
+         # But the original code had explicit sampling logic for HANDLEs later (lines 132-140).
+         # Let's check if we should preserve the raw input if it's a HANDLE.
+         val_temp = ctx.get_input('Field')
+         if val_temp and val_temp.type == DataType.HANDLE:
+             val_input = val_temp
+         # If not handle, input_vec4 did the right thing.
+    
+    # Actually, let's keep it simple. `ctx.get_input` is safer if we have special type handling logic downstream.
+    val_input = ctx.get_input('Field')
+    if val_input is None: 
+         val_input = builder.constant((0.0, 0.0, 0.0, 1.0), DataType.VEC4)
     
     # Determine dimensions from node property
     is_3d = getattr(node, 'dim_mode', '2D') == '3D'

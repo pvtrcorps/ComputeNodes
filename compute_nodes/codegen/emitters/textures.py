@@ -4,7 +4,7 @@
 
 def emit_noise(op, ctx):
     """Emit noise texture function call."""
-    param = ctx['param']
+    param = ctx.param
     
     dims = op.attrs.get('dimensions', '3D')
     normalize = "1.0f" if op.attrs.get('normalize', True) else "0.0f"
@@ -41,7 +41,7 @@ def emit_noise(op, ctx):
 
 def emit_white_noise(op, ctx):
     """Emit white noise function call."""
-    param = ctx['param']
+    param = ctx.param
     
     dims = op.attrs.get('dimensions', '3D')
     
@@ -80,7 +80,7 @@ def emit_white_noise(op, ctx):
 
 def emit_voronoi(op, ctx):
     """Emit voronoi texture function call."""
-    param = ctx['param']
+    param = ctx.param
     
     dims = op.attrs.get('dimensions', '3D')
     feature = op.attrs.get('feature', 'F1')

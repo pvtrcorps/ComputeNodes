@@ -16,8 +16,8 @@ def emit_blur(op, ctx):
     
     Generates separable Gaussian blur kernel.
     """
-    param = ctx['param']
-    graph = ctx.get('graph')
+    param = ctx.param
+    graph = ctx.graph
     
     # Get blur metadata
     metadata = getattr(op, 'metadata', {})
@@ -28,7 +28,7 @@ def emit_blur(op, ctx):
     output_idx = metadata.get('output_idx', 1)
     
     # Remap resource indices to binding slots using context's binding_map
-    binding_map = ctx.get('binding_map', {})
+    binding_map = ctx.binding_map
     input_slot = binding_map.get(input_idx, input_idx)
     output_slot = binding_map.get(output_idx, output_idx)
     

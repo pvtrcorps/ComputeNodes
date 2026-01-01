@@ -26,8 +26,8 @@ def emit_image_store(op, ctx):
     - Grid2D: imageStore(img, ivec2, data)
     - Grid3D: imageStore(img, ivec3, data)
     """
-    param = ctx['param']
-    graph = ctx['graph']
+    param = ctx.param
+    graph = ctx.graph
     
     img = param(op.inputs[0])
     
@@ -73,9 +73,9 @@ def emit_image_load(op, ctx):
     - Grid2D: imageLoad(img, ivec2)
     - Grid3D: imageLoad(img, ivec3)
     """
-    lhs = ctx['lhs']
-    param = ctx['param']
-    graph = ctx['graph']
+    lhs = ctx.lhs
+    param = ctx.param
+    graph = ctx.graph
     
     img = param(op.inputs[0])
     
@@ -94,7 +94,7 @@ def emit_image_load(op, ctx):
     force_inline = False
     if coord_val.kind == ValueKind.SSA:
         # Check if origin is in current pass (Local SSA)
-        current_op_ids = ctx.get('op_ids', set())
+        current_op_ids = ctx.op_ids
         if coord_val.origin and id(coord_val.origin) in current_op_ids:
             # Local variable, safe to use directly
             force_inline = False
@@ -114,7 +114,7 @@ def emit_image_load(op, ctx):
     # Check if sampler or image
     # If the resource is NOT written in this pass, it is bound as a sampler (READ_ONLY).
     # If it IS written, it is bound as an image (READ_WRITE/WRITE_ONLY).
-    writes_idx = ctx.get('writes_idx', set())
+    writes_idx = ctx.writes_idx
     
     if res_idx is not None:
         # Determine if it's bound as image (writable) or sampler (read-only)
@@ -130,9 +130,9 @@ def emit_image_load(op, ctx):
 
 def emit_image_size(op, ctx):
     """Emit imageSize operation - returns ivec3 for both 2D and 3D grids."""
-    lhs = ctx['lhs']
-    param = ctx['param']
-    graph = ctx['graph']
+    lhs = ctx.lhs
+    param = ctx.param
+    graph = ctx.graph
     
     img = param(op.inputs[0])
     
@@ -144,7 +144,7 @@ def emit_image_size(op, ctx):
         is_3d = getattr(res, 'dimensions', 2) == 3
     
     # Check if sampler or image binding
-    writes_idx = ctx.get('writes_idx', set())
+    writes_idx = ctx.writes_idx
     
     if res_idx is not None:
         # If not written, it's a sampler
@@ -183,13 +183,13 @@ def emit_sample(op, ctx):
     Returns:
         GLSL code string for the texture() or imageLoad() call
     """
-    lhs = ctx['lhs']
-    dispatch_size = ctx.get('dispatch_size', (512, 512, 1))
-    param = ctx['param']
-    current_op_ids = ctx.get('op_ids', set())
-    graph = ctx.get('graph')
-    reads_idx = ctx.get('reads_idx', set())
-    writes_idx = ctx.get('writes_idx', set())
+    lhs = ctx.lhs
+    dispatch_size = ctx.dispatch_size
+    param = ctx.param
+    current_op_ids = ctx.op_ids
+    graph = ctx.graph
+    reads_idx = ctx.reads_idx
+    writes_idx = ctx.writes_idx
     
     sampler_val = op.inputs[0]
     uv_input = op.inputs[1]
@@ -201,7 +201,7 @@ def emit_sample(op, ctx):
     # Get sampler name - if we found a resource_index, use img_X format
     if res_idx is not None:
         # Get binding slot from context's binding_map
-        binding_map = ctx.get('binding_map', {})
+        binding_map = ctx.binding_map
         slot = binding_map.get(res_idx, res_idx)
         sampler = f"img_{slot}"
     else:

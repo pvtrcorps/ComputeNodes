@@ -28,20 +28,8 @@ def handle_output_image(node, ctx):
     filepath = getattr(node, 'filepath', '')
     file_format = getattr(node, 'file_format', 'OPEN_EXR')
     
-    # Get input data
-    val_data = ctx.get_input(0)
-    
-    if val_data is None:
-        logger.warning(f"Output Image '{node.name}': No grid connected")
-        return None
-    
-    # VALIDATE: Input must be a GRID (HANDLE)
-    if val_data.type != DataType.HANDLE:
-        raise TypeError(
-            f"Output Image '{node.name}' requires a Grid input.\n"
-            f"Got: {val_data.type.name} (Field)\n"
-            f"Solution: Insert a Capture node before Output Image."
-        )
+    # Get input data using validation
+    val_data = ctx.require_input(0, expected_type=DataType.HANDLE)
     
     # Find the source resource to get dimensions
     # Trace through PASS_LOOP_END if needed (when Grid comes from a repeat zone)

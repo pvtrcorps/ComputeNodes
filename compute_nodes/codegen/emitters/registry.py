@@ -5,8 +5,10 @@ from ...ir.ops import OpCode
 from ...ir.graph import Op
 from typing import Dict, Callable, Any, Optional
 
-# Emitter signature: (op: Op, ctx: Dict[str, Any]) -> str
-EmitterType = Callable[[Op, Dict[str, Any]], str]
+from ..shader_context import ShaderContext
+
+# Emitter signature: (op: Op, ctx: ShaderContext) -> str
+EmitterType = Callable[[Op, ShaderContext], str]
 
 from .arithmetic import emit_add, emit_sub, emit_mul, emit_div, emit_mod
 from .arithmetic import emit_multiply_add, emit_wrap, emit_snap, emit_pingpong
@@ -81,8 +83,8 @@ EMITTER_REGISTRY: Dict[OpCode, EmitterType] = {
     
     # Compare
     OpCode.COMPARE: emit_compare,
-    OpCode.LT: lambda op, ctx: f"{ctx['lhs']}({ctx['param'](op.inputs[0])} < {ctx['param'](op.inputs[1])}) ? 1.0 : 0.0;",
-    OpCode.GT: lambda op, ctx: f"{ctx['lhs']}({ctx['param'](op.inputs[0])} > {ctx['param'](op.inputs[1])}) ? 1.0 : 0.0;",
+    OpCode.LT: lambda op, ctx: f"{ctx.lhs}({ctx.param(op.inputs[0])} < {ctx.param(op.inputs[1])}) ? 1.0 : 0.0;",
+    OpCode.GT: lambda op, ctx: f"{ctx.lhs}({ctx.param(op.inputs[0])} > {ctx.param(op.inputs[1])}) ? 1.0 : 0.0;",
     
     # Vector
     OpCode.DOT: emit_dot,

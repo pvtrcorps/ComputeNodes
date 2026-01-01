@@ -47,35 +47,29 @@ def handle_image_info(node, ctx):
     """Handle ComputeNodeImageInfo node - returns separate width, height, depth, and dimensionality."""
     builder = ctx.builder
     
-    val_img = ctx.get_input(0)
+    # Get input data using validation
+    val_img = ctx.require_input(0, expected_type=DataType.HANDLE)
     
-    if not val_img:
-        # No input: return zeros
-        val_width = builder.constant(0, DataType.INT)
-        val_height = builder.constant(0, DataType.INT)
-        val_depth = builder.constant(1, DataType.INT)  # Default to 1 for depth
-        val_dims = builder.constant(2, DataType.INT)   # Default to 2D
+    # Calculate size and dims from val_img...
+    # (Existing logic continues below, we just replaced the fetching/validation part)
+    
+    # Get image size as IVEC3 (handles both 2D and 3D)
+    val_size = builder.image_size(val_img)
+    
+    # Extract individual components
+    val_width = builder.swizzle(val_size, "x")
+    val_height = builder.swizzle(val_size, "y")
+    val_depth = builder.swizzle(val_size, "z")
+    
+    # Determine dimensionality from resource descriptor
+    graph = builder.graph
+    if val_img.resource_index is not None and val_img.resource_index < len(graph.resources):
+        res = graph.resources[val_img.resource_index]
+        dimensions = getattr(res, 'dimensions', 2)
+        val_dims = builder.constant(dimensions, DataType.INT)
     else:
-        if val_img.type != DataType.HANDLE:
-            raise TypeError(f"Node '{node.name}': Input must be a Grid (got {val_img.type.name})")
-        
-        # Get image size as IVEC3 (handles both 2D and 3D)
-        val_size = builder.image_size(val_img)
-        
-        # Extract individual components
-        val_width = builder.swizzle(val_size, "x")
-        val_height = builder.swizzle(val_size, "y")
-        val_depth = builder.swizzle(val_size, "z")
-        
-        # Determine dimensionality from resource descriptor
-        graph = builder.graph
-        if val_img.resource_index is not None and val_img.resource_index < len(graph.resources):
-            res = graph.resources[val_img.resource_index]
-            dimensions = getattr(res, 'dimensions', 2)
-            val_dims = builder.constant(dimensions, DataType.INT)
-        else:
-            # Default to 2D if resource not found
-            val_dims = builder.constant(2, DataType.INT)
+        # Default to 2D if resource not found
+        val_dims = builder.constant(2, DataType.INT)
     
     # Map outputs: Width, Height, Depth, Dimensionality
     ctx.set_output(0, val_width)

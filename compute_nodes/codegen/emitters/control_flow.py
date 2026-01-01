@@ -4,8 +4,8 @@
 
 def emit_loop_start(op, ctx):
     """Emit loop start: declares accumulator and begins for loop."""
-    param = ctx['param']
-    type_str = ctx['type_str']
+    param = ctx.param
+    type_str = ctx.type_str
     
     iters = param(op.inputs[0])
     init_val = param(op.inputs[1])
@@ -24,8 +24,8 @@ def emit_loop_start(op, ctx):
 
 def emit_loop_end(op, ctx):
     """Emit loop end: updates accumulator and closes loop."""
-    param = ctx['param']
-    type_str = ctx['type_str']
+    param = ctx.param
+    type_str = ctx.type_str
     
     next_val = param(op.inputs[0])
     acc_val = param(op.inputs[1])
@@ -50,7 +50,7 @@ def emit_pass_loop_begin(op, ctx):
     
     The executor passes u_loop_iteration for each iteration of the multi-pass loop.
     """
-    type_str = ctx['type_str']
+    type_str = ctx.type_str
     lines = []
     
     # Declare iteration counter output from uniform (set by executor each iteration)

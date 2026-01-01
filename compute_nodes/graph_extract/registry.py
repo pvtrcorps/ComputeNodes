@@ -18,9 +18,11 @@ from .handlers.reroute import handle_reroute
 from typing import Dict, Optional, Callable, Any
 from ..ir.graph import Value
 
+from .node_context import NodeContext
+
 # Registry mapping node bl_idname to handler function
-# Handler signature: (node: Any, ctx: Dict[str, Any]) -> Optional[Value]
-HandlerType = Callable[[Any, Dict[str, Any]], Optional[Value]]
+# Handler signature: (node: Any, ctx: NodeContext) -> Optional[Value]
+HandlerType = Callable[[Any, NodeContext], Optional[Value]]
 
 HANDLER_REGISTRY: Dict[str, HandlerType] = {
     # Images
