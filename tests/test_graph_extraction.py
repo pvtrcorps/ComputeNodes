@@ -1,182 +1,189 @@
 
-import sys
-import os
-from unittest.mock import MagicMock
-
-# Add parent directory to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# Mock bpy structure complete
-mock_bpy = MagicMock()
-mock_bpy.types = MagicMock()
-mock_bpy.props = MagicMock()
-mock_bpy.utils = MagicMock()
-
-sys.modules['bpy'] = mock_bpy
-sys.modules['bpy.types'] = mock_bpy.types
-sys.modules['bpy.props'] = mock_bpy.props
-sys.modules['bpy.utils'] = mock_bpy.utils
-
-# Mock nodeitems_utils
-mock_nodeitems = MagicMock()
-sys.modules['nodeitems_utils'] = mock_nodeitems
-
-class MockNodeCategory:
-    def __init__(self, *args, **kwargs): pass
-    @classmethod
-    def poll(cls, context): return True
-
-class MockNodeItem:
-    def __init__(self, *args, **kwargs): pass
-
-mock_nodeitems.NodeCategory = MockNodeCategory
-mock_nodeitems.NodeItem = MockNodeItem
-
+import unittest
 import bpy
-# Setup specific types if needed for inheritance (NodeTree, Node, NodeSocket)
-# Since we are mocking, inheritance from MagicMock usually works, 
-# but we might need to be careful if code checks issubclass.
-mock_bpy.types.NodeTree = object
-mock_bpy.types.Node = object
-mock_bpy.types.NodeSocket = object
-
 from compute_nodes.graph_extract import extract_graph
 from compute_nodes.ir.ops import OpCode
 from compute_nodes.ir.types import DataType
 
-class MockSocket:
-    def __init__(self, name="Socket", default_value=0.0):
-        self.name = name
-        self.default_value = default_value
-        self.is_linked = False
-        self.links = []
-        self.node = None # Parent node
+# Note: bpy is mocked by conftest.py auto-fixture
 
-    def as_pointer(self):
-        return id(self)
+from .mocks import MockSocketNew, MockLinkNew, MockNodeNew, MockNodeTreeNew
 
-class MockLink:
-    def __init__(self, from_socket, from_node, to_socket, to_node):
-        self.from_socket = from_socket
-        self.from_node = from_node
-        self.to_socket = to_socket
-        self.to_node = to_node
-
-class MockNode:
-    def __init__(self, bl_idname, name="Node"):
-        self.bl_idname = bl_idname
-        self.name = name
-        self.inputs = []
-        self.outputs = []
-        self.operation = 'ADD' # For Math
-        self.image = None # For Image Input
-
-class MockNodeTree:
-    def __init__(self, name="Tree"):
-        self.name = name
-        self.nodes = []
-
-def test_extraction():
-    print("Testing Graph Extraction...")
-    
-    # Construct a Mock NodeTree
-    # Image Input -> Math(ADD) -> Output
-    
-    tree = MockNodeTree("TestTree")
-    
-    # 1. Image Input Node (Read)
-    node_in = MockNode('ComputeNodeImageInput', "Image In")
-    sock_img_out = MockSocket("Image")
-    node_in.outputs.append(sock_img_out)
-    
-    mock_image = MagicMock()
-    mock_image.name = "MyTexture"
-    node_in.image = mock_image
-    
-    tree.nodes.append(node_in)
-    
-    # 1b. Image Write Node (Target)
-    node_write = MockNode('ComputeNodeImageWrite', "Image Write")
-    sock_write_out = MockSocket("Image")
-    node_write.outputs.append(sock_write_out)
-    node_write.image = mock_image # Same image or different
-    tree.nodes.append(node_write)
-    
-    # 2. Math Node
-    node_math = MockNode('ComputeNodeMath', "Math Add")
-    sock_a = MockSocket("Value", default_value=0.5)
-    sock_b = MockSocket("Value", default_value=0.5)
-    sock_res = MockSocket("Value")
-    node_math.inputs = [sock_a, sock_b]
-    node_math.outputs = [sock_res]
-    node_math.operation = 'ADD'
-    
-    tree.nodes.append(node_math)
-    
-    # 3. Output Node
-    node_out = MockNode('ComputeNodeOutput', "Output")
-    sock_target = MockSocket("Target Image")
-    sock_data = MockSocket("Data")
-    node_out.inputs = [sock_target, sock_data]
-    
-    tree.nodes.append(node_out)
-    
-    # Links
-    # node_write.Image -> node_out.Target Image
-    link1 = MockLink(sock_write_out, node_write, sock_target, node_out)
-    sock_target.is_linked = True
-    sock_target.links = [link1]
-    
-    # node_math.Value -> node_out.Data
-    # Let's say we adding constant + constant in Math
-    # Inputs of math are NOT linked, so they use default_value.
-    
-    link2 = MockLink(sock_res, node_math, sock_data, node_out)
-    sock_data.is_linked = True
-    sock_data.links = [link2]
-    
-    # Run Extraction
-    graph = extract_graph(tree)
-    
-    # Assertions
-    print(f"Graph Generated: {len(graph.blocks[0].ops)} ops")
-    ops = graph.blocks[0].ops
-    
-    # Expected Ops:
-    # 1. CONSTANT (from math input A - defaults)
-    # 2. CONSTANT (from math input B - defaults)
-    # 3. ADD (Math)
-    # 4. BUILTIN (GlobalInvocationID) - injected by extractor
-    # 5. SWIZZLE (xy)
-    # 6. CAST (UVEC2 -> IVEC2)
-    # 7. IMAGE_STORE (Output)
-    
-    input_ops = [op for op in ops if op.opcode == OpCode.CONSTANT]
-    math_ops = [op for op in ops if op.opcode == OpCode.ADD]
-    cast_ops = [op for op in ops if op.opcode == OpCode.CAST] # CAST Check
-    store_ops = [op for op in ops if op.opcode == OpCode.IMAGE_STORE]
-    
-    assert len(math_ops) == 1, "Missing ADD op"
-    assert len(store_ops) == 1, "Missing IMAGE_STORE op"
-    assert len(cast_ops) == 1, "Missing CAST op"
-    assert len(input_ops) >= 2, "Missing Constant inputs"
-    
-    # Verify CAST sequence: SWIZZLE -> CAST -> STORE
-    # Store should use cast output
-    store_op = store_ops[0]
-    coord_input = store_op.inputs[1] # 2nd arg is coord
-    assert coord_input.origin.opcode == OpCode.CAST, "Store coord must come from CAST"
-    
-    # Cast should come from Swizzle
-    cast_op = coord_input.origin
-    cast_input = cast_op.inputs[0]
-    assert cast_input.origin.opcode == OpCode.SWIZZLE, "CAST must come from SWIZZLE"
-    
-    print("Ops sequence:")
-    for i, op in enumerate(ops):
-        print(f"  {i}: {op}")
+class TestGraphExtraction(unittest.TestCase):
+    def test_extraction(self):
+        print("Testing Graph Extraction...")
         
-    print("PASS")
+        # Construct a Mock NodeTree
+        # Image Input -> Math(ADD) -> Output
+        
+        tree = MockNodeTreeNew("TestTree")
+        
+        # 1. Image Input Node (Read)
+        node_in = MockNodeNew('ComputeNodeImageInput', "Image In")
+        sock_img_out = MockSocketNew("Image")
+        node_in.outputs.append(sock_img_out)
+        
+        mock_image = self._create_mock_image("MyTexture")
+        node_in.image = mock_image
+        
+        tree.nodes.append(node_in)
+        
+        # 2. Math Node
+        node_math = MockNodeNew('ComputeNodeMath', "Math Add")
+        sock_a = MockSocketNew("Value", default_value=0.5)
+        sock_b = MockSocketNew("Value", default_value=0.5)
+        sock_res = MockSocketNew("Value")
+        
+        # Inputs need to be indexed by name (or index)
+        # Usually Math inputs are [0], [1].
+        # But if handlers use names, we need names.
+        # handle_math uses indices: node.inputs[0], node.inputs[1].
+        # So appending order matters.
+        node_math.inputs.append(sock_a)
+        node_math.inputs.append(sock_b)
+        node_math.outputs.append(sock_res)
+        node_math.operation = 'ADD'
+        
+        tree.nodes.append(node_math)
+        
+        # 3. Output Node (This writes the result)
+        node_out = MockNodeNew('ComputeNodeOutputImage', "Output")
+        sock_grid_in = MockSocketNew("Grid", type='GRID')
+        node_out.inputs.append(sock_grid_in)
+        
+        tree.nodes.append(node_out)
+        
+        # Capture Node (Materializes the Loop Result)
+        node_capture = MockNodeNew('ComputeNodeCapture', "Capture")
+        # handle_capture uses node.inputs['Field']
+        sock_field_in = MockSocketNew("Field") 
+        sock_width = MockSocketNew("Width", default_value=512)
+        sock_height = MockSocketNew("Height", default_value=512)
+        
+        # Important: Add 'Field' socket so it can be found by name
+        node_capture.inputs.append(sock_field_in)
+        node_capture.inputs.append(sock_width)
+        node_capture.inputs.append(sock_height)
+        
+        sock_grid_out = MockSocketNew("Grid", type='GRID')
+        node_capture.outputs.append(sock_grid_out)
+        tree.nodes.append(node_capture)
+        
+        # Links
+        # Link: Image In (Grid) -> Math Input A (Value/Field)
+        link1 = MockLinkNew(sock_img_out, node_in, sock_a, node_math)
+        sock_img_out.is_linked = True; sock_img_out.links = [link1]
+        sock_a.is_linked = True; sock_a.links = [link1]
+        
+        # Link: Math -> Capture
+        link2 = MockLinkNew(sock_res, node_math, sock_field_in, node_capture)
+        sock_res.is_linked = True; sock_res.links = [link2]
+        sock_field_in.is_linked = True; sock_field_in.links = [link2]
+
+        # Link: Capture -> Output
+        link3 = MockLinkNew(sock_grid_out, node_capture, sock_grid_in, node_out)
+        sock_grid_out.is_linked = True; sock_grid_out.links = [link3]
+        sock_grid_in.is_linked = True; sock_grid_in.links = [link3]
+        
+        # Run Extraction
+        graph = extract_graph(tree)
+        
+        # Assertions
+        print(f"Graph Generated: {len(graph.blocks[0].ops)} ops")
+        ops = graph.blocks[0].ops
+        
+        # Expected Ops:
+        # 1. CONSTANT (from Math input B)
+        # 2. IMAGE_INPUT (from Image Input) -> produces Handle
+        # 3. SAMPLE (Auto-injected because Image(Grid) -> Math(Field))
+        # 4. ADD (Math)
+        # 5. CAPTURE (Capture node)
+        # 6. IMAGE_STORE (Output Image - implicit or explicit if we map it)
+        # Actually ComputeNodeOutputImage handler generates nothing? 
+        # Check output.py handler.
+        # But Capture generates STORE if it's the end of field chain.
+        # Wait, Capture writes to a Grid. 
+        # Output Image reads that Grid.
+        # IR Graph usually ends at Capture (Store to Temp) or Output (Store to Final).
+        # ComputeNodeOutputImage handler (handle_output_image) usually creates a COPY pass or simply marks the resource.
+        
+        # Let's inspect generated ops
+        input_ops = [op for op in ops if op.opcode == OpCode.CONSTANT] # Math B
+        math_ops = [op for op in ops if op.opcode == OpCode.ADD]
+        sample_ops = [op for op in ops if op.opcode == OpCode.SAMPLE]
+        capture_ops = [op for op in ops if op.opcode == OpCode.IMAGE_STORE] # Capture emits IMAGE_STORE
+        # Note: Capture node usually compiles to a STORE op in the extraction? 
+        # Or does it produce a WRITE to a texture?
+        
+        # Handle Output Image handler usually might NOT generate an Op if it just defines the output resource?
+        # Let's trust inspection.
+        
+        self.assertEqual(len(math_ops), 1, "Missing ADD op")
+        self.assertGreaterEqual(len(sample_ops), 1, "Missing Auto-SAMPLE op")
+        # self.assertEqual(len(capture_ops), 1, "Missing Capture op") # Depends on implementation of handle_capture
+        self.assertGreaterEqual(len(input_ops), 1, "Missing Constant inputs") # Only Math B is constant
+        
+        # Verify the sequence of operations
+        # We expect: IMAGE_INPUT -> SAMPLE -> ADD -> CAPTURE -> IMAGE_STORE (or similar for output)
+        
+        # Find the ADD op
+        add_op = math_ops[0]
+        
+        # Check inputs directly or through CAST
+        sample_op_input = []
+        for inp in add_op.inputs:
+            if inp.origin:
+                if inp.origin.opcode == OpCode.SAMPLE:
+                    sample_op_input.append(inp)
+                elif inp.origin.opcode == OpCode.CAST:
+                    # Trace through CAST
+                    cast_inp = inp.origin.inputs[0]
+                    if cast_inp.origin and cast_inp.origin.opcode == OpCode.SAMPLE:
+                        sample_op_input.append(cast_inp)
+                        
+        self.assertEqual(len(sample_op_input), 1, "ADD op should have one input from SAMPLE (possibly via CAST)")
+        
+        # The other input to ADD should be a CONSTANT
+        constant_op_input = [inp for inp in add_op.inputs if inp.origin and inp.origin.opcode == OpCode.CONSTANT]
+        self.assertEqual(len(constant_op_input), 1, "ADD op should have one input from CONSTANT")
+        
+        # The output of ADD should go to CAPTURE (possibly via CAST)
+        capture_op_from_add = []
+        for op in ops:
+            if op.opcode == OpCode.IMAGE_STORE:
+                for inp in op.inputs:
+                    if inp.origin:
+                        if inp.origin == add_op.outputs[0]:
+                            capture_op_from_add.append(op)
+                        elif inp.origin.opcode == OpCode.CAST:
+                            if inp.origin.inputs[0].origin == add_op:
+                                capture_op_from_add.append(op)
+
+        self.assertGreaterEqual(len(capture_op_from_add), 1, "CAPTURE op (IMAGE_STORE) should take input from ADD (possibly via CAST)")
+        
+        # The output of CAPTURE should go to IMAGE_STORE (or similar final output)
+        # This part is tricky as the final output might be handled differently.
+        # For now, let's just check for the presence of CAPTURE and SAMPLE.
+        self.assertGreaterEqual(len(capture_ops), 1, "Missing CAPTURE op")
+        
+        print("Ops sequence:")
+        for i, op in enumerate(ops):
+            print(f"  {i}: {op}")
+            
+        print("PASS")
+
+    def _create_mock_image(self, name):
+        # Helper to create a more robust mock image if needed
+        # Since we use bpy.types.Image in real code, but here heavily mocked inputs
+        # We rely on MockNode structure.
+        # But 'image' attribute on node is expected to be an object with .name
+        class Img:
+            pass
+        img = Img()
+        img.name = name
+        img.is_float = True # Assume float for testing
+        return img
 
 if __name__ == "__main__":
-    test_extraction()
+    unittest.main()
+

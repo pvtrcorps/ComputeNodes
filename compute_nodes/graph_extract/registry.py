@@ -15,8 +15,14 @@ from .handlers.viewer import handle_viewer
 from .handlers.nodegroup import handle_nodegroup, handle_group_input, handle_group_output
 from .handlers.reroute import handle_reroute
 
+from typing import Dict, Optional, Callable, Any
+from ..ir.graph import Value
+
 # Registry mapping node bl_idname to handler function
-HANDLER_REGISTRY = {
+# Handler signature: (node: Any, ctx: Dict[str, Any]) -> Optional[Value]
+HandlerType = Callable[[Any, Dict[str, Any]], Optional[Value]]
+
+HANDLER_REGISTRY: Dict[str, HandlerType] = {
     # Images
     'ComputeNodeImageInput': handle_image_input,
     'ComputeNodeImageInfo': handle_image_info,
@@ -66,7 +72,7 @@ HANDLER_REGISTRY = {
     'NodeReroute': handle_reroute,
 }
 
-def get_handler(bl_idname):
+def get_handler(bl_idname: str) -> Optional[HandlerType]:
     """Get handler function for a node type, or None if not found."""
     return HANDLER_REGISTRY.get(bl_idname)
 

@@ -2,6 +2,11 @@
 # Maps OpCode -> emitter function
 
 from ...ir.ops import OpCode
+from ...ir.graph import Op
+from typing import Dict, Callable, Any, Optional
+
+# Emitter signature: (op: Op, ctx: Dict[str, Any]) -> str
+EmitterType = Callable[[Op, Dict[str, Any]], str]
 
 from .arithmetic import emit_add, emit_sub, emit_mul, emit_div, emit_mod
 from .arithmetic import emit_multiply_add, emit_wrap, emit_snap, emit_pingpong
@@ -18,7 +23,7 @@ from .blur import emit_blur
 
 
 # Registry mapping OpCode to emitter function
-EMITTER_REGISTRY = {
+EMITTER_REGISTRY: Dict[OpCode, EmitterType] = {
     # Arithmetic
     OpCode.ADD: emit_add,
     OpCode.SUB: emit_sub,
@@ -132,7 +137,7 @@ EMITTER_REGISTRY = {
 }
 
 
-def get_emitter(opcode):
+def get_emitter(opcode: OpCode) -> Optional[EmitterType]:
     """Get emitter function for an OpCode, or None if not found."""
     return EMITTER_REGISTRY.get(opcode)
 

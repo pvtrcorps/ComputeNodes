@@ -1,4 +1,4 @@
-from typing import List, Set, Union
+from typing import List, Set, Union, Dict
 from ..ir.graph import Graph, Op, ValueKind
 from ..ir.resources import ImageDesc
 from ..ir.ops import OpCode
@@ -54,8 +54,8 @@ def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
     passes: List[ComputePass] = []
     
     current_pass = ComputePass(pass_id=0)
-    dirtied_resources = set()
-    op_to_pass = {}  # Track which pass each op was originally assigned to
+    dirtied_resources: Set[int] = set()
+    op_to_pass: Dict[int, int] = {}  # Track which pass each op was originally assigned to
     
     for op in ops:
         # Check for Hazards
@@ -138,7 +138,7 @@ def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
     # Find PASS_LOOP_BEGIN/END pairs and wrap intervening passes
     loop_regions = find_loop_regions(ops)
     if loop_regions:
-        passes = wrap_passes_in_loops(passes, loop_regions, ops)
+        passes = wrap_passes_in_loops(passes, loop_regions, ops, graph)
         
     return passes
 

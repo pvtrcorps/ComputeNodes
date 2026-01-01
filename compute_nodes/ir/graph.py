@@ -7,7 +7,7 @@ from .ops import OpCode, infer_binary_type
 from .resources import ResourceDesc, ResourceType
 
 
-def _trace_resource_index(val) -> Optional[int]:
+def _trace_resource_index(val: 'Value') -> Optional[int]:
     """
     Trace back through SSA origin chain to find the underlying resource index.
     

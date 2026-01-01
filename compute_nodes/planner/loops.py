@@ -74,12 +74,18 @@ def find_loop_regions(ops: List) -> List[Dict]:
     return regions
 
 
-def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List) -> List:
+def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List, graph=None) -> List:
     """
     Wraps sequences of ComputePass into PassLoop structures based on regions.
     
     Supports nested loops by using stack-based parsing to match BEGIN/END pairs.
     Each PassLoop can contain other PassLoops in its body_passes.
+    
+    Args:
+        passes: List of ComputePass
+        regions: List of loop regions
+        ops: List of ops
+        graph: Optional Graph object for resource lookup (needed to populate pass.writes/reads)
     """
     from ..planner.passes import ComputePass
     from ..ir.ops import OpCode
@@ -149,7 +155,7 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List) -> List:
         
         return items, i
     
-    def items_to_passes(items, dispatch_size):
+    def items_to_passes(items):
         """Convert list of ops/PassLoops to list of ComputePass/PassLoop."""
         result_list = []
         current_ops = []
@@ -159,12 +165,40 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List) -> List:
             if current_ops:
                 cp = ComputePass(pass_id=new_pass_id())
                 cp.ops.extend(current_ops)
-                cp.dispatch_size = dispatch_size
+                
+                # Default dispatch
+                cp.dispatch_size = (0, 0, 0)
+                
+                max_w, max_h, max_d = 0, 0, 1
+                
                 for op in current_ops:
                     for idx in op.reads_resources():
                         cp.reads_idx.add(idx)
+                        if graph and idx < len(graph.resources):
+                            cp.reads.add(graph.resources[idx])
+                            
                     for idx in op.writes_resources():
                         cp.writes_idx.add(idx)
+                        if graph and idx < len(graph.resources):
+                            res = graph.resources[idx]
+                            cp.writes.add(res)
+                            
+                            # Track max dimensions for dispatch
+                            if hasattr(res, 'width'):
+                                w = getattr(res, 'width', 0)
+                                h = getattr(res, 'height', 0)
+                                d = getattr(res, 'depth', 1)
+                                if w * h * d > max_w * max_h * max_d:
+                                    max_w, max_h, max_d = w, h, d
+                
+                if max_w > 0:
+                    cp.dispatch_size = (max_w, max_h, max_d)
+                else:
+                    # Fallback/Inherit?
+                    # For loops, maybe we want to use the 'main' loop size if available?
+                    # But (0,0,0) allows runtime defaults.
+                    pass
+                            
                 result_list.append(cp)
                 current_ops = []
         
@@ -173,7 +207,7 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List) -> List:
                 flush_ops()
                 # Recursively convert body items
                 if hasattr(item, '_raw_body_items'):
-                    item.body_passes = items_to_passes(item._raw_body_items, dispatch_size)
+                    item.body_passes = items_to_passes(item._raw_body_items)
                     delattr(item, '_raw_body_items')
                 result_list.append(item)
             else:
@@ -189,7 +223,6 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List) -> List:
     
     # First, merge all ops from all passes that contain any loop markers
     all_ops = []
-    dispatch_size = (512, 512, 1)  # Default
     
     # Check if ANY pass has loop markers - if so, we need unified processing
     any_loop_markers = any(
@@ -201,12 +234,10 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List) -> List:
         # Merge all ops from all passes
         for p in passes:
             all_ops.extend(p.ops)
-            if p.dispatch_size and p.dispatch_size[0] > 0:
-                dispatch_size = p.dispatch_size
         
         # Parse the merged ops
         parsed_items, _ = parse_ops_recursive(all_ops, 0)
-        result = items_to_passes(parsed_items, dispatch_size)
+        result = items_to_passes(parsed_items)
     else:
         # No loops - just return passes as-is
         result = list(passes)

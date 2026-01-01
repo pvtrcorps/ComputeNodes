@@ -1,4 +1,4 @@
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Any
 from ..ir.graph import Graph, Op, Value, ValueKind
 from ..ir.ops import OpCode
 from ..ir.types import DataType
@@ -41,8 +41,8 @@ class ShaderGenerator:
         
         # Create resource index -> sequential binding slot mapping
         # GPU has max 8 binding slots (0-7), so we must remap sparse indices
-        all_indices = sorted(list(compute_pass.reads_idx | compute_pass.writes_idx))
-        self._binding_map = {res_idx: slot for slot, res_idx in enumerate(all_indices)}
+        all_indices: List[int] = sorted(list(compute_pass.reads_idx | compute_pass.writes_idx))
+        self._binding_map: Dict[int, int] = {res_idx: slot for slot, res_idx in enumerate(all_indices)}
         
         # 1. Generate main first to discover required GLSL functions
         main_section = self._generate_main(compute_pass)
@@ -157,7 +157,7 @@ class ShaderGenerator:
             return val.name_hint
         return "UNKNOWN"
     
-    def _format_constant(self, value, dtype: DataType) -> str:
+    def _format_constant(self, value: Any, dtype: DataType) -> str:
         """Format a Python value as GLSL literal."""
         from .emitters.const import format_constant
         return format_constant(value, dtype)

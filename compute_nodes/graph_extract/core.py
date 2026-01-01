@@ -65,8 +65,13 @@ def extract_graph(nodetree) -> Graph:
         using normalized UV coordinates.
         """
         key = get_socket_key(socket)
+        if hasattr(socket, 'name'):
+             pass # print(f"DEBUG_CORE: get_socket_value {socket.name} (Node: {socket.node.name if hasattr(socket, 'node') and socket.node else 'None'}). Linked: {socket.is_linked}")
+
         if key in socket_value_map:
             return socket_value_map[key]
+            
+        # print(f"DEBUG: get_socket_value {socket.name} (Node: {socket.node.name}). Linked: {socket.is_linked}")
             
         # If linked, traverse
         if socket.is_linked:
@@ -76,6 +81,15 @@ def extract_graph(nodetree) -> Graph:
             link = socket.links[0]
             from_socket = link.from_socket
             from_node = link.from_node
+            
+            # Optimization/Cycle Breaking: Check if source socket is already computed
+            # This allows reading outputs from a node that is currently on the recursion stack
+            # (e.g. Repeat Input providing values for the loop body)
+            from_key = get_socket_key(from_socket)
+            if from_key in socket_value_map:
+                val = socket_value_map[from_key]
+                socket_value_map[key] = val
+                return val
             
             # Recursive call to process dependency
             val = process_node(from_node, from_socket)
