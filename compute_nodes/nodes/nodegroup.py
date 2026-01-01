@@ -2,7 +2,7 @@
 # Complete implementation with dynamic socket add/remove
 import bpy
 from bpy.props import PointerProperty, StringProperty, CollectionProperty, BoolProperty, IntProperty
-from .base import ComputeNode
+from ..nodetree import ComputeNode
 from ..sockets import ComputeSocketGrid, map_socket_type
 
 

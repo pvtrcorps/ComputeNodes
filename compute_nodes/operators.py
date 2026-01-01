@@ -8,18 +8,56 @@ from .planner.scheduler import schedule_passes
 from .codegen.glsl import ShaderGenerator
 from .runtime import TextureManager, ShaderManager, ComputeExecutor
 
-# Global Runtime Singleton (Simple MVP)
-_texture_mgr = None
-_shader_mgr = None
-_executor = None
+
+# =============================================================================
+# ExecutionContext - Encapsulates all runtime state
+# =============================================================================
+
+class ExecutionContext:
+    """
+    Encapsulates runtime state for a single graph execution.
+    
+    Benefits over global singletons:
+    - Thread-safe: each execution gets its own context
+    - Testable: can be mocked/injected in tests
+    - Stateless between executions: no stale data issues
+    """
+    _instance = None  # Optional cached instance for performance
+    
+    def __init__(self, fresh: bool = False):
+        """
+        Initialize execution context.
+        
+        Args:
+            fresh: If True, create new managers. If False, reuse cached managers.
+        """
+        if fresh or ExecutionContext._instance is None:
+            self.texture_mgr = TextureManager()
+            self.shader_mgr = ShaderManager()
+            self.executor = ComputeExecutor(self.texture_mgr, self.shader_mgr)
+            if not fresh:
+                ExecutionContext._instance = self
+        else:
+            # Reuse cached instance for performance
+            cached = ExecutionContext._instance
+            self.texture_mgr = cached.texture_mgr
+            self.shader_mgr = cached.shader_mgr
+            self.executor = cached.executor
+    
+    @classmethod
+    def get(cls, fresh: bool = False) -> 'ExecutionContext':
+        """Factory method to get an execution context."""
+        return cls(fresh=fresh)
+    
+    @classmethod
+    def reset(cls):
+        """Clear cached instance (useful for testing)."""
+        cls._instance = None
+
 
 def get_executor():
-    global _texture_mgr, _shader_mgr, _executor
-    if _executor is None:
-        _texture_mgr = TextureManager()
-        _shader_mgr = ShaderManager()
-        _executor = ComputeExecutor(_texture_mgr, _shader_mgr)
-    return _executor
+    """Backward-compatible accessor for executor."""
+    return ExecutionContext.get().executor
 
 
 def _generate_shader_for_item(item, generator):

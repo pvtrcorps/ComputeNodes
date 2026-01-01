@@ -27,21 +27,6 @@ def handle_image_input(node, ctx):
     return val
 
 
-def handle_image_write(node, ctx):
-    """Handle ComputeNodeImageWrite node."""
-    builder = ctx.builder
-    
-    img = node.image
-    if not img:
-        val = builder.constant(0.0, DataType.FLOAT)
-    else:
-        fmt = "rgba32f" if img.is_float else "rgba8"
-        desc = ImageDesc(name=img.name, access=ResourceAccess.WRITE, format=fmt)
-        val = builder.add_resource(desc)
-    
-    ctx.set_output(0, val)
-    return val
-
 
 def handle_image_info(node, ctx):
     """Handle ComputeNodeImageInfo node - returns separate width, height, depth, and dimensionality."""

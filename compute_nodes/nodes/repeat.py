@@ -5,6 +5,7 @@
 # - RepeatOutput: Exit point with matching state pairs
 # - Extension socket pattern for Blender-like UX
 # - Paired nodes linked via pointer property
+# - RepeatZoneMixin: Shared extension socket logic
 
 import bpy
 from bpy.props import (
@@ -17,6 +18,55 @@ from bpy.props import (
 from ..nodetree import ComputeNode
 from ..sockets import ComputeSocketGrid, ComputeSocketEmpty
 from ..utils.sockets import with_sync_guard
+
+
+# =============================================================================
+# RepeatZoneMixin - Shared extension socket behavior
+# =============================================================================
+
+class RepeatZoneMixin:
+    """
+    Mixin class providing shared extension socket behavior for Repeat Zone nodes.
+    
+    Both RepeatInput and RepeatOutput nodes use the same pattern:
+    - Empty sockets at the end for drag-to-add UX
+    - Grid-only validation for state variables
+    - Socket drawing that hides Empty sockets
+    """
+    
+    def _ensure_extension_socket(self):
+        """Add the special extension socket for drag-to-add pattern."""
+        if not self.inputs or self.inputs[-1].bl_idname != 'ComputeSocketEmpty':
+            self.inputs.new('ComputeSocketEmpty', "Empty")
+        
+        if not self.outputs or self.outputs[-1].bl_idname != 'ComputeSocketEmpty':
+            self.outputs.new('ComputeSocketEmpty', "Empty")
+    
+    def _is_extension_socket(self, socket):
+        """Check if socket is the extension socket."""
+        return socket.bl_idname == 'ComputeSocketEmpty'
+    
+    def _get_extension_socket(self, is_output=False):
+        """Find the extension socket."""
+        sockets = self.outputs if is_output else self.inputs
+        if sockets and sockets[-1].bl_idname == 'ComputeSocketEmpty':
+            return sockets[-1]
+        return None
+    
+    def draw_socket(self, context, layout, socket, text):
+        """Draw socket - hides Empty sockets."""
+        if socket.bl_idname == 'ComputeSocketEmpty':
+            layout.label(text="")
+            return
+        layout.label(text=text)
+    
+    def _validate_grid_only(self, link, connected_socket):
+        """Validate that connection is Grid-only. Returns True if valid."""
+        if 'Grid' not in connected_socket.bl_idname:
+            self.id_data.links.remove(link)
+            # Note: self.report is not available in all contexts, use logging
+            return False
+        return True
 
 
 # =============================================================================
@@ -106,7 +156,7 @@ class ComputeRepeatItem(bpy.types.PropertyGroup):
 # Repeat Input Node
 # =============================================================================
 
-class ComputeNodeRepeatInput(ComputeNode):
+class ComputeNodeRepeatInput(RepeatZoneMixin, ComputeNode):
     """Repeat Zone (Input) - Start of an iterative loop.
     
     Supports N state variables that persist across iterations.
@@ -147,15 +197,8 @@ class ComputeNodeRepeatInput(ComputeNode):
         # Extension socket (blank, for drag-to-add) - added last
         self._ensure_extension_socket()
     
-    def _ensure_extension_socket(self):
-        """Add the special extension socket for drag-to-add pattern."""
-        # Input side Empty
-        if not self.inputs or self.inputs[-1].bl_idname != 'ComputeSocketEmpty':
-            self.inputs.new('ComputeSocketEmpty', "Empty")
-        
-        # Output side Empty (for connecting Current values)
-        if not self.outputs or self.outputs[-1].bl_idname != 'ComputeSocketEmpty':
-            self.outputs.new('ComputeSocketEmpty', "Empty")
+    # Note: _ensure_extension_socket, _is_extension_socket, _get_extension_socket,
+    # and draw_socket are inherited from RepeatZoneMixin
     
     def _make_unique_name(self, base_name):
         """Ensure name is unique among repeat_items."""
@@ -170,23 +213,6 @@ class ComputeNodeRepeatInput(ComputeNode):
             if new_name not in existing:
                 return new_name
             i += 1
-            
-    def draw_socket(self, context, layout, socket, text):
-        if socket.bl_idname == 'ComputeSocketEmpty':
-            layout.label(text="")
-            return
-        layout.label(text=text)
-    
-    def _is_extension_socket(self, socket):
-        """Check if socket is the extension socket."""
-        return socket.bl_idname == 'ComputeSocketEmpty'
-    
-    def _get_extension_socket(self, is_output=False):
-        """Find the extension socket."""
-        sockets = self.outputs if is_output else self.inputs
-        if sockets and sockets[-1].bl_idname == 'ComputeSocketEmpty':
-            return sockets[-1]
-        return None
     
     def update(self):
         """Called when node connections change."""
@@ -396,7 +422,7 @@ class ComputeNodeRepeatInput(ComputeNode):
 # Repeat Output Node
 # =============================================================================
 
-class ComputeNodeRepeatOutput(ComputeNode):
+class ComputeNodeRepeatOutput(RepeatZoneMixin, ComputeNode):
     """Repeat Zone (Output) - End of an iterative loop.
     
     Receives Next values and outputs Final values after all iterations.
@@ -422,32 +448,8 @@ class ComputeNodeRepeatOutput(ComputeNode):
         # Extension socket for drag-to-add pattern (same as Input)
         self._ensure_extension_socket()
     
-    def _ensure_extension_socket(self):
-        """Add the special extension socket for drag-to-add pattern."""
-        # Input side Empty (for Next values)
-        if not self.inputs or self.inputs[-1].bl_idname != 'ComputeSocketEmpty':
-            self.inputs.new('ComputeSocketEmpty', "Empty")
-        
-        # Output side Empty (for Final values)
-        if not self.outputs or self.outputs[-1].bl_idname != 'ComputeSocketEmpty':
-            self.outputs.new('ComputeSocketEmpty', "Empty")
-    
-    def _is_extension_socket(self, socket):
-        """Check if socket is the extension socket."""
-        return socket.bl_idname == 'ComputeSocketEmpty'
-    
-    def _get_extension_socket(self, is_output=False):
-        """Find the extension socket."""
-        sockets = self.outputs if is_output else self.inputs
-        if sockets and sockets[-1].bl_idname == 'ComputeSocketEmpty':
-            return sockets[-1]
-        return None
-    
-    def draw_socket(self, context, layout, socket, text):
-        if socket.bl_idname == 'ComputeSocketEmpty':
-            layout.label(text="")
-            return
-        layout.label(text=text)
+    # Note: _ensure_extension_socket, _is_extension_socket, _get_extension_socket,
+    # and draw_socket are inherited from RepeatZoneMixin
     
     def update(self):
         """Called when node connections change."""
