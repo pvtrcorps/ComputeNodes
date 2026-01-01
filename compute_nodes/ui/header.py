@@ -25,22 +25,29 @@ def draw_header_controls(self, context):
     # 2. Auto-Execute Toggle
     row.prop(tree, "auto_execute", text="", icon='FILE_REFRESH')
     
-    # 3. Profiling Controls
-    # Group them visually
+    # Separator
     row.separator()
-    row.prop(tree, "profile_execution", text="", icon='TIME', toggle=True)
     
-    # Show time if profiling is enabled
-    if tree.profile_execution:
-        # Draw as a label in a box style or just text?
-        # Header usually prefers simple text or buttons.
-        # Let's align it nicely.
-        sub = row.row(align=True)
-        # Using a label with an icon looks good
-        if tree.execution_time_total > 0:
-            sub.label(text=f"{tree.execution_time_total:.2f} ms")
-        else:
-            sub.label(text="... ms")
+    # 3. Profiling Controls (Combined Block)
+    # [ Time Icon (Toggle) ] [ 12.34 ms ]
+    
+    sub = row.row(align=True)
+    sub.prop(tree, "profile_execution", text="", icon='TIME', toggle=True)
+    
+    # Time label - Always visible to prevent layout jump
+    # We use a row for the label so we can enable/disable it visually
+    label_row = sub.row(align=True)
+    label_row.enabled = tree.profile_execution  # Dim text when disabled
+    
+    if tree.execution_time_total > 0:
+        time_text = f" {tree.execution_time_total:.2f} ms " 
+    else:
+        time_text = " 0.00 ms "
+        
+    # Using a flat operator or standard label? 
+    # Label is better but alignment in header can be tricky.
+    # We add a small box or align it.
+    label_row.label(text=time_text)
 
 def register():
     bpy.types.NODE_HT_header.append(draw_header_controls)
