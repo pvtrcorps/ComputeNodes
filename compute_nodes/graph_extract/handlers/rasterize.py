@@ -67,6 +67,39 @@ def handle_capture(node, ctx):
             # It's a CONSTANT op - extract static value
             return int(val.origin.attrs['value']), False, None
         
+        # Check if it comes from IMAGE_SIZE - we can extract static size from the resource
+        if val.origin and val.origin.opcode == OpCode.IMAGE_SIZE:
+            # Get the input image handle
+            img_input = val.origin.inputs[0] if val.origin.inputs else None
+            if img_input and img_input.resource_index is not None:
+                graph = builder.graph
+                if img_input.resource_index < len(graph.resources):
+                    res = graph.resources[img_input.resource_index]
+                    if hasattr(res, 'size') and res.size:
+                        # For direct IMAGE_SIZE output (IVEC3) use name to guess component
+                        if socket_name == 'Width' and len(res.size) > 0:
+                            return res.size[0], False, None
+                        elif socket_name == 'Height' and len(res.size) > 1:
+                            return res.size[1], False, None
+        
+        # Check if val is from SWIZZLE of IMAGE_SIZE (Grid Info connected)
+        if val.origin and val.origin.opcode == OpCode.SWIZZLE:
+            swizzle_input = val.origin.inputs[0] if val.origin.inputs else None
+            if swizzle_input and swizzle_input.origin and swizzle_input.origin.opcode == OpCode.IMAGE_SIZE:
+                img_size_op = swizzle_input.origin
+                img_input = img_size_op.inputs[0] if img_size_op.inputs else None
+                if img_input and img_input.resource_index is not None:
+                    graph = builder.graph
+                    if img_input.resource_index < len(graph.resources):
+                        res = graph.resources[img_input.resource_index]
+                        if hasattr(res, 'size') and res.size:
+                            # Get swizzle mask (e.g., 'x', 'y', 'z')
+                            mask = val.origin.attrs.get('mask', 'x')
+                            idx = {'x': 0, 'y': 1, 'z': 2}.get(mask, 0)
+                            if idx < len(res.size):
+                                logger.info(f"Capture '{node.name}': Extracted {socket_name}={res.size[idx]} from Grid Info")
+                                return res.size[idx], False, None
+        
         # It's a dynamic value (not constant) - mark as dynamic
         # Use socket default as fallback size, but store expression for runtime
         logger.info(f"Capture '{node.name}': {socket_name} is dynamic (non-constant)")

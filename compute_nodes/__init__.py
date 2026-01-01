@@ -15,26 +15,30 @@ classes = [
     ComputeNode,
 ] + socket_classes + specific_nodes
 
+
 from . import categories
 from . import operators
-from . import ui  # Zone drawing and visual enhancements
+from . import group_ops
+from . import ui  # Zone drawing, keymaps, etc.
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     categories.register()
     operators.register()
+    group_ops.register()
     # Register repeat module extras (operators, panel)
     repeat_module.register()
     # Register nodegroup operators
     nodegroup_module.register()
-    # Register UI enhancements (zone drawing)
+    # Register UI enhancements (zone drawing, keymaps)
     ui.register()
 
 def unregister():
     ui.unregister()
     nodegroup_module.unregister()
     repeat_module.unregister()
+    group_ops.unregister()
     operators.unregister()
     categories.unregister()
     for cls in reversed(classes):

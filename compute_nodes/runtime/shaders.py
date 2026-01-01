@@ -70,11 +70,17 @@ class ShaderManager:
                 # Only bind resources used in this pass
                 used_indices = reads_set | writes_set
                 
-                for i, res in enumerate(resources):
-                    if i not in used_indices:
-                        continue
-                        
-                    uniform_name = f"img_{i}"
+                # Create resource index -> sequential binding slot mapping
+                # GPU has max 8 binding slots (0-7), so we remap sparse indices
+                sorted_indices = sorted(used_indices)
+                binding_map = {res_idx: slot for slot, res_idx in enumerate(sorted_indices)}
+                
+                for res_idx in sorted_indices:
+                    res = resources[res_idx]
+                    
+                    # Use sequential binding slot to stay within GPU limit
+                    binding_slot = binding_map[res_idx]
+                    uniform_name = f"img_{binding_slot}"  # Match GLSL codegen
                     
                     # Determine image type based on dimensions
                     if isinstance(res, ImageDesc):
@@ -93,12 +99,12 @@ class ShaderManager:
                         image_type = "FLOAT_2D"
                     
                     # Determine binding based on PASS-SPECIFIC access
-                    is_read = i in reads_set
-                    is_write = i in writes_set
+                    is_read = res_idx in reads_set
+                    is_write = res_idx in writes_set
                     
                     if is_read and not is_write:
                         # Read-only in this pass: use sampler for texture()
-                        shader_info.sampler(i, sampler_type, uniform_name)
+                        shader_info.sampler(binding_slot, sampler_type, uniform_name)
                     else:
                         # Write or read-write: use image for imageStore/imageLoad
                         if hasattr(res, 'format') and res.format:
@@ -115,7 +121,7 @@ class ShaderManager:
                             fmt = 'RGBA32F'
                             
                         qualifiers = {'READ', 'WRITE'}
-                        shader_info.image(i, fmt, image_type, uniform_name, qualifiers=qualifiers)
+                        shader_info.image(binding_slot, fmt, image_type, uniform_name, qualifiers=qualifiers)
             
             # Push constants for Position normalization
             shader_info.push_constant('INT', 'u_dispatch_width')

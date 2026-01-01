@@ -49,8 +49,22 @@ def handle_position(node, ctx):
         val_size_vec3 = builder._new_value(ValueKind.SSA, DataType.VEC3, origin=op_size)
         op_size.add_output(val_size_vec3)
         
-        # Normalize: pos / size -> vec3(x/w, y/h, z/d)
-        op_div = builder.add_op(OpCode.DIV, [val_pos, val_size_vec3])
+        # CRITICAL FIX: Add 0.5 texel offset for texel-center sampling
+        # Without this, UV = pos/size points to texel corners (0/512, 1/512...)
+        # texture() with bilinear filtering expects texel centers ((pos+0.5)/size)
+        # In loops with Sample+Capture, this 0.5 texel error accumulates per iteration
+        val_half = builder.constant(0.5, DataType.FLOAT)
+        val_half_vec3 = builder.add_op(OpCode.COMBINE_XYZ, [val_half, val_half, val_half])
+        val_offset = builder._new_value(ValueKind.SSA, DataType.VEC3, origin=val_half_vec3)
+        val_half_vec3.add_output(val_offset)
+        
+        # pos + 0.5
+        op_offset_pos = builder.add_op(OpCode.ADD, [val_pos, val_offset])
+        val_centered_pos = builder._new_value(ValueKind.SSA, DataType.VEC3, origin=op_offset_pos)
+        op_offset_pos.add_output(val_centered_pos)
+        
+        # Normalize: (pos + 0.5) / size -> texel center UVs
+        op_div = builder.add_op(OpCode.DIV, [val_centered_pos, val_size_vec3])
         val_norm = builder._new_value(ValueKind.SSA, DataType.VEC3, origin=op_div)
         op_div.add_output(val_norm)
         

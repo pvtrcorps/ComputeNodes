@@ -15,6 +15,9 @@ class StateVar:
     is_grid: bool
     data_type: Any  # DataType
     
+    # Unified socket name (used by new repeat system)
+    socket_name: Optional[str] = None
+    
     # For Grid types: ping-pong buffer indices
     ping_idx: Optional[int] = None
     pong_idx: Optional[int] = None
@@ -212,19 +215,34 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List) -> List:
         flush_ops()
         return result_list
     
-    # Process each input pass
-    for p in passes:
-        # Check if this pass has any loop markers
-        has_loop = any(op.opcode in (OpCode.PASS_LOOP_BEGIN, OpCode.PASS_LOOP_END) 
-                       for op in p.ops)
+    # CRITICAL FIX: When hazard detection splits a loop region into multiple passes,
+    # we need to merge ALL ops and parse once, not process passes individually.
+    # Otherwise, LOOP_BEGIN may be in Pass 0, LOOP_END in Pass 3, and ops between
+    # them get incorrectly structured.
+    
+    # First, merge all ops from all passes that contain any loop markers
+    all_ops = []
+    dispatch_size = (512, 512, 1)  # Default
+    
+    # Check if ANY pass has loop markers - if so, we need unified processing
+    any_loop_markers = any(
+        any(op.opcode in (OpCode.PASS_LOOP_BEGIN, OpCode.PASS_LOOP_END) for op in p.ops)
+        for p in passes
+    )
+    
+    if any_loop_markers:
+        # Merge all ops from all passes
+        for p in passes:
+            all_ops.extend(p.ops)
+            if p.dispatch_size and p.dispatch_size[0] > 0:
+                dispatch_size = p.dispatch_size
         
-        if has_loop:
-            # Parse and restructure
-            parsed_items, _ = parse_ops_recursive(p.ops, 0)
-            new_passes = items_to_passes(parsed_items, p.dispatch_size)
-            result.extend(new_passes)
-        else:
-            result.append(p)
+        # Parse the merged ops
+        parsed_items, _ = parse_ops_recursive(all_ops, 0)
+        result = items_to_passes(parsed_items, dispatch_size)
+    else:
+        # No loops - just return passes as-is
+        result = list(passes)
     
     return result
 

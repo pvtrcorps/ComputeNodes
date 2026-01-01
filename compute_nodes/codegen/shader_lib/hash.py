@@ -7,7 +7,7 @@ uint rot(uint x, uint k) {
     return (x << k) | (x >> (32u - k));
 }
 
-void mix(inout uint a, inout uint b, inout uint c) {
+void hash_mix(inout uint a, inout uint b, inout uint c) {
     a -= c; a ^= rot(c, 4u); c += b;
     b -= a; b ^= rot(a, 6u); a += c;
     c -= b; c ^= rot(b, 8u); b += a;
@@ -63,7 +63,7 @@ uint hash_int4(uint kx, uint ky, uint kz, uint kw)
   a += kx;
   b += ky;
   c += kz;
-  mix(a, b, c);
+  hash_mix(a, b, c);
   a += kw;
   final(a, b, c);
   return c;

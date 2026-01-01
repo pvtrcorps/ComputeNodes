@@ -18,6 +18,8 @@ PURE_FIELD_OPS = {
     OpCode.NOISE, OpCode.VORONOI, OpCode.COMPARE, OpCode.SELECT,
     OpCode.SNAP, OpCode.WRAP, OpCode.CLAMP, OpCode.MAP_RANGE,
     OpCode.MIX, OpCode.MULTIPLY_ADD,
+    OpCode.SAMPLE,  # Read-only operation, safe to duplicate across passes
+    OpCode.IMAGE_SIZE,  # Read-only metadata query, safe to duplicate
 }
 
 

@@ -39,6 +39,11 @@ class ShaderGenerator:
         self._required_bundles: Set[str] = set()
         self._required_funcs: Set[str] = set()
         
+        # Create resource index -> sequential binding slot mapping
+        # GPU has max 8 binding slots (0-7), so we must remap sparse indices
+        all_indices = sorted(list(compute_pass.reads_idx | compute_pass.writes_idx))
+        self._binding_map = {res_idx: slot for slot, res_idx in enumerate(all_indices)}
+        
         # 1. Generate main first to discover required GLSL functions
         main_section = self._generate_main(compute_pass)
         
@@ -92,7 +97,8 @@ class ShaderGenerator:
                 qualifier = ""
 
             if isinstance(res, ImageDesc):
-                uniform_name = f"img_{res_idx}" 
+                # Use sequential binding slot for uniform name
+                uniform_name = f"img_{binding_idx}" 
                 # GPUShaderCreateInfo.image() handles uniform declaration
                 pass
             
@@ -105,6 +111,9 @@ class ShaderGenerator:
     def _generate_main(self, compute_pass: ComputePass) -> str:
         # Store current pass for emitter context
         self._current_pass = compute_pass
+        
+        # Track emitted operations to prevent duplicate declarations
+        self._emitted_op_ids = set()
         
         lines = ["void main() {"]
         for op in compute_pass.ops:
@@ -129,7 +138,9 @@ class ShaderGenerator:
         
         if val.kind == ValueKind.SSA:
             if val.resource_index is not None:
-                return f"img_{val.resource_index}"
+                # Use sequential binding slot from mapping
+                slot = self._binding_map.get(val.resource_index, val.resource_index)
+                return f"img_{slot}"
             return f"v{val.id}"
         elif val.kind == ValueKind.CONSTANT:
             if val.id in self._emitted_ids:
@@ -139,7 +150,9 @@ class ShaderGenerator:
                 return self._format_constant(const_val, val.type)
             return f"v{val.id}"
         elif val.kind == ValueKind.ARGUMENT:
-            return f"img_{val.resource_index}"
+            # Use sequential binding slot from mapping
+            slot = self._binding_map.get(val.resource_index, val.resource_index)
+            return f"img_{slot}"
         elif val.kind == ValueKind.BUILTIN:
             return val.name_hint
         return "UNKNOWN"
@@ -165,6 +178,12 @@ class ShaderGenerator:
     def _emit_op(self, op: Op) -> str:
         """Emit GLSL code for an operation using the modular emitter registry."""
         from .emitters import get_emitter
+        
+        # Check if this op was already emitted (prevents duplicate declarations)
+        op_id = id(op)
+        if op_id in self._emitted_op_ids:
+            return ""  # Skip duplicate
+        self._emitted_op_ids.add(op_id)
         
         # Ops that handle their own output declarations
         self_declaring_ops = {OpCode.IMAGE_STORE, OpCode.SEPARATE_XYZ, OpCode.SEPARATE_COLOR}

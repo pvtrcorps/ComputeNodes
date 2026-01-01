@@ -92,6 +92,13 @@ def handle_image_info(node, ctx):
     socket_value_map[get_socket_key(node.outputs[2])] = val_depth
     socket_value_map[get_socket_key(node.outputs[3])] = val_dims
     
+    # Return the requested output socket's value if specified
+    output_socket_needed = ctx.get('output_socket_needed')
+    if output_socket_needed:
+        for i, out_sock in enumerate(node.outputs):
+            if out_sock == output_socket_needed:
+                return [val_width, val_height, val_depth, val_dims][i]
+    
     return val_width
 
 

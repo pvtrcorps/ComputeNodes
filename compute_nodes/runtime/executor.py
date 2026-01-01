@@ -184,12 +184,18 @@ class ComputeExecutor:
         # Bind resources based on PASS-SPECIFIC access
         used_indices = compute_pass.reads_idx.union(compute_pass.writes_idx)
         
-        for idx in used_indices:
+        # Create same binding map as GLSL codegen
+        sorted_indices = sorted(used_indices)
+        binding_map = {res_idx: slot for slot, res_idx in enumerate(sorted_indices)}
+        
+        for idx in sorted_indices:
             if idx not in texture_map:
                 continue
                 
             tex = texture_map[idx]
-            uniform_name = f"img_{idx}"
+            # Use sequential binding slot to match shader
+            slot = binding_map[idx]
+            uniform_name = f"img_{slot}"
             
             # Use pass-specific access (read-only in this pass = sampler, write = image)
             is_read_in_pass = idx in compute_pass.reads_idx

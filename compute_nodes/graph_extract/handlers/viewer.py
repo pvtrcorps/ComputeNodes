@@ -67,10 +67,9 @@ def handle_viewer(node, ctx):
         val_sampled = val_data
         # Convert to vec4 if needed
         if val_data.type == DataType.FLOAT:
-            val_sampled = builder.emit(OpCode.SWIZZLE, [val_data], DataType.VEC4)
+            val_sampled = builder.cast(val_data, DataType.VEC4)
         elif val_data.type == DataType.VEC3:
-            val_one = builder.constant(1.0, DataType.FLOAT)
-            val_sampled = builder.emit(OpCode.COMBINE_XYZ, [val_data, val_one], DataType.VEC4)
+            val_sampled = builder.cast(val_data, DataType.VEC4)
     
     # Store to grid
     val_gid = builder.builtin("gl_GlobalInvocationID", DataType.UVEC3)

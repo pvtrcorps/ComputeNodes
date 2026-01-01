@@ -86,11 +86,13 @@ def handle_nodegroup(node, ctx):
                         'get_socket_value': get_socket_value,
                         'output_socket_needed': from_socket,
                     }
-                    val = handler(from_node, inner_ctx)
+                    handler(from_node, inner_ctx)
                     
-                    # If handler returns value, cache it for the output socket
-                    if val is not None:
-                        socket_value_map[from_key] = val
+                    # After handler executes, check if the socket value was stored
+                    # NOTE: Don't use the return value! Multi-output handlers store
+                    # all outputs in socket_value_map but return only one value.
+                    # The correct value is already stored with from_key.
+                    val = socket_value_map.get(from_key)
                 else:
                     val = None
             
