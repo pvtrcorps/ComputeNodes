@@ -29,6 +29,23 @@ SOCKET_TO_DATATYPE = {
     'NodeSocketInt': DataType.INT,
 }
 
+# Import centralized resource tracing from graph.py
+from ...ir.graph import _trace_resource_index
+from ...ir.state import StateVar
+
+
+def _find_source_resource(val, graph):
+    """
+    Find the source ResourceDesc for a value by tracing through SSA origins.
+    
+    This is a thin wrapper around _trace_resource_index that returns
+    the actual ResourceDesc instead of just the index.
+    """
+    res_idx = _trace_resource_index(val)
+    if res_idx is not None and res_idx < len(graph.resources):
+        return graph.resources[res_idx]
+    return None
+
 
 def handle_repeat_output(node, ctx):
     """
@@ -94,31 +111,35 @@ def handle_repeat_output(node, ctx):
         
         data_type = DataType.HANDLE  # Always HANDLE for Grids
         
-        state = {
-            'name': item.name,
-            'index': i,
-            'is_grid': True,  # Always True now
-            'data_type': data_type,
-            'initial_value': val_initial,
-            'socket_name': socket_name,  # Unified socket name (replaces initial/current/next/final)
-        }
+        # Create StateVar object instead of dict
+        state = StateVar(
+            name=item.name,
+            index=i,
+            is_grid=True,
+            data_type=data_type,
+            initial_value=val_initial,
+            socket_name=socket_name
+        )
         
         # For Grid states, create ping-pong buffer resources
         if is_grid and val_initial is not None:
-            # Get size from initial (if it has resource info)
-            source_resource = None
-            if hasattr(val_initial, 'resource_index') and val_initial.resource_index is not None:
-                source_resource = builder.graph.resources[val_initial.resource_index]
+            # Get size and format from initial (trace through origin chain if needed)
+            source_resource = _find_source_resource(val_initial, builder.graph)
             
             if source_resource:
                 size = source_resource.size
                 dims = source_resource.dimensions
+                # Inherit format from source (no more hardcoded RGBA32F)
+                fmt = getattr(source_resource, 'format', 'RGBA32F')
                 
-                # Create ping-pong buffer pair
+                # Store format in state for executor
+                state.format = fmt
+                
+                # Create ping-pong buffer pair with inherited format
                 desc_ping = ImageDesc(
                     name=f"loop_{node.name}_{item.name}_ping",
                     access=ResourceAccess.READ_WRITE,
-                    format='RGBA32F',
+                    format=fmt,
                     size=size,
                     dimensions=dims,
                     is_internal=True
@@ -126,7 +147,7 @@ def handle_repeat_output(node, ctx):
                 desc_pong = ImageDesc(
                     name=f"loop_{node.name}_{item.name}_pong",
                     access=ResourceAccess.READ_WRITE,
-                    format='RGBA32F',
+                    format=fmt,
                     size=size,
                     dimensions=dims,
                     is_internal=True
@@ -135,10 +156,10 @@ def handle_repeat_output(node, ctx):
                 val_ping = builder.add_resource(desc_ping)
                 val_pong = builder.add_resource(desc_pong)
                 
-                state['ping_idx'] = val_ping.resource_index
-                state['pong_idx'] = val_pong.resource_index
-                state['size'] = size
-                state['dimensions'] = dims
+                state.ping_idx = val_ping.resource_index
+                state.pong_idx = val_pong.resource_index
+                state.size = size
+                state.dimensions = dims
         
         state_vars.append(state)
     
@@ -165,80 +186,80 @@ def handle_repeat_output(node, ctx):
     for state in state_vars:
         # Grid: emit PASS_LOOP_READ that references ping buffer
         op_read = builder.add_op(OpCode.PASS_LOOP_READ, [])
-        op_read.metadata = {'state_index': state['index'], 'state_name': state['name']}
+        op_read.metadata = {'state_index': state.index, 'state_name': state.name}
         
         val_current = builder._new_value(ValueKind.SSA, DataType.HANDLE, origin=op_read)
-        if 'ping_idx' in state:
-            val_current.resource_index = state['ping_idx']
+        if state.ping_idx is not None:
+            val_current.resource_index = state.ping_idx
         op_read.add_output(val_current)
         
         # Map to Current socket (same name on output)
-        current_key = get_socket_key(repeat_input.outputs[state['socket_name']])
+        current_key = get_socket_key(repeat_input.outputs[state.socket_name])
         socket_value_map[current_key] = val_current
-        state['current_value'] = val_current
+        state.current_value = val_current
     
     # Now process the body (get values flowing into Next sockets)
     for state in state_vars:
         val_next = None
-        if state['socket_name'] in node.inputs:
-            val_next = get_socket_value(node.inputs[state['socket_name']])
+        if state.socket_name in node.inputs:
+            val_next = get_socket_value(node.inputs[state.socket_name])
         
         if val_next is None:
-            val_next = state.get('current_value')
+            val_next = state.current_value
         
         if val_next is None:
-            val_next = builder.constant(0.0, state['data_type'])
+            val_next = builder.constant(0.0, state.data_type)
         
         # For Grid states: if the "next" value comes from a different resource,
         # we need to copy it to the pong buffer. This happens when e.g. Blur
         # creates its own output resource.
-        if state['is_grid'] and 'pong_idx' in state:
-            if val_next.resource_index is not None and val_next.resource_index != state['pong_idx']:
+        if state.is_grid and state.pong_idx is not None:
+            if val_next.resource_index is not None and val_next.resource_index != state.pong_idx:
                 # Need to copy from blur output to pong buffer
-                logger.debug(f"Adding copy: resource {val_next.resource_index} -> pong {state['pong_idx']}")
+                logger.debug(f"Adding copy: resource {val_next.resource_index} -> pong {state.pong_idx}")
                 
                 # Create pong resource value
                 pong_val = builder._new_value(ValueKind.SSA, DataType.HANDLE)
-                pong_val.resource_index = state['pong_idx']
+                pong_val.resource_index = state.pong_idx
                 
                 # Add IMAGE_STORE to copy - using the sample+store pattern
                 # Actually, we should create a proper COPY op or use the blur directly
                 # For now, mark that the pong should mirror the blur output
                 # The executor will handle this via the val_next -> pong mapping
-                state['copy_from_resource'] = val_next.resource_index
+                state.copy_from_resource = val_next.resource_index
         
-        state['next_value'] = val_next
+        state.next_value = val_next
     
     # Emit PASS_LOOP_END
-    next_values = [s['next_value'] for s in state_vars]
+    next_values = [s.next_value for s in state_vars]
     op_end = builder.add_op(OpCode.PASS_LOOP_END, next_values)
     op_end.metadata = loop_metadata
     
     # Create output values for Final sockets (same name on output)
     results = {}
     for i, state in enumerate(state_vars):
-        val_final = builder._new_value(ValueKind.SSA, state['data_type'], origin=op_end)
+        val_final = builder._new_value(ValueKind.SSA, state.data_type, origin=op_end)
         op_end.add_output(val_final)
         
-        if state['is_grid'] and 'pong_idx' in state:
-            val_final.resource_index = state['pong_idx']
+        if state.is_grid and state.pong_idx is not None:
+            val_final.resource_index = state.pong_idx
         
         # Map to Final socket (same name on RepeatOutput output)
-        final_key = get_socket_key(node.outputs[state['socket_name']])
+        final_key = get_socket_key(node.outputs[state.socket_name])
         socket_value_map[final_key] = val_final
-        results[state['name']] = val_final
+        results[state.name] = val_final
     
     # Return the requested output value (based on which Final socket was asked for)
     output_socket_needed = ctx.get('output_socket_needed')
     if output_socket_needed:
         # Find which state matches the requested socket
         for state in state_vars:
-            if state['socket_name'] == output_socket_needed.name:
-                return results.get(state['name'])
+            if state.socket_name == output_socket_needed.name:
+                return results.get(state.name)
     
     # Fallback: return first output
     if state_vars:
-        return results.get(state_vars[0]['name'])
+        return results.get(state_vars[0].name)
     return None
 
 

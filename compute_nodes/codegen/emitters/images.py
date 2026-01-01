@@ -1,8 +1,17 @@
 # Image Operation Emitters
 # Handles: IMAGE_STORE, IMAGE_LOAD, IMAGE_SIZE, SAMPLE
 
-from ...ir.graph import ValueKind
+from ...ir.graph import ValueKind, _trace_resource_index
 from ...ir.types import DataType
+from ...ir.ops import OpCode
+
+
+def _find_resource_index_from_value(val, graph=None):
+    """
+    Wrapper for backwards compatibility - graph param is ignored.
+    The centralized _trace_resource_index doesn't need the graph.
+    """
+    return _trace_resource_index(val)
 
 
 def emit_image_store(op, ctx):
@@ -182,13 +191,28 @@ def emit_sample(op, ctx):
     reads_idx = ctx.get('reads_idx', set())
     writes_idx = ctx.get('writes_idx', set())
     
-    sampler = param(op.inputs[0])
+    sampler_val = op.inputs[0]
     uv_input = op.inputs[1]
+    
+    # Trace back through SSA origin chain to find the actual resource index
+    # This handles cases where sampler comes from PASS_LOOP_END or PASS_LOOP_READ
+    res_idx = _find_resource_index_from_value(sampler_val, graph)
+    
+    # Get sampler name - if we found a resource_index, use img_X format
+    if res_idx is not None:
+        # Get binding slot from context's binding_map
+        binding_map = ctx.get('binding_map', {})
+        slot = binding_map.get(res_idx, res_idx)
+        sampler = f"img_{slot}"
+    else:
+        # Fall back to param() for SSA name (will cause error if var not declared)
+        sampler = param(sampler_val)
+
+    
     
     # Detect if texture is 3D from resource descriptor
     is_3d = False
-    res_idx = op.inputs[0].resource_index
-    if res_idx is not None and graph:
+    if res_idx is not None and graph and res_idx < len(graph.resources):
         res = graph.resources[res_idx]
         is_3d = getattr(res, 'dimensions', 2) == 3
     

@@ -116,12 +116,13 @@ class ComputeNodeTree(NodeTree):
             
         except AttributeError:
              pass # Likely _RestrictData during registration
-        except ImportError:
-            pass # Module might not be ready during registration
         except Exception as e:
             print(f"Interface sync failed: {e}")
 
-        # 2. Auto Execute
+        # 2. Sync Reroute Nodes (Visual Fix)
+        self._sync_reroute_nodes()
+
+        # 3. Auto Execute
         if getattr(self, "auto_execute", False):
             try:
                 from .operators import execute_compute_tree
@@ -130,10 +131,29 @@ class ComputeNodeTree(NodeTree):
             except Exception as e:
                 print(f"Tree update failed: {e}")
 
+    def _sync_reroute_nodes(self):
+        """
+        Force all NodeReroute nodes to use ComputeSocketReroute.
+        ComputeSocketReroute's draw_color dynamically matches the source.
+        """
+        for node in self.nodes:
+            if node.bl_idname == 'NodeReroute':
+                if hasattr(node, "socket_idname"):
+                    node.socket_idname = 'ComputeSocketReroute'
+
+    def _update_auto_execute(self, context):
+        if self.auto_execute:
+            try:
+                from .operators import execute_compute_tree
+                execute_compute_tree(self, context)
+            except Exception as e:
+                print(f"Auto-execute trigger failed: {e}")
+
     auto_execute: bpy.props.BoolProperty(
         name="Auto Execute",
         description="Automatically execute graph on changes",
-        default=False
+        default=False,
+        update=_update_auto_execute
     )
     
     profile_execution: bpy.props.BoolProperty(

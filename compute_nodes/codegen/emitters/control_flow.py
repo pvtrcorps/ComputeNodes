@@ -46,18 +46,18 @@ def emit_loop_end(op, ctx):
 
 def emit_pass_loop_begin(op, ctx):
     """
-    PASS_LOOP_BEGIN: No-op in GLSL.
-    Loop iteration is handled by executor.
-    Output iteration index as constant 0 (will be overwritten per-pass).
+    PASS_LOOP_BEGIN: Emit iteration counter from uniform.
+    
+    The executor passes u_loop_iteration for each iteration of the multi-pass loop.
     """
     type_str = ctx['type_str']
     lines = []
     
-    # Declare iteration counter output
+    # Declare iteration counter output from uniform (set by executor each iteration)
     if op.outputs:
         iter_id = op.outputs[0].id
-        lines.append(f"    // Pass loop iteration (managed by executor)")
-        lines.append(f"    int v{iter_id} = 0;")
+        lines.append(f"    // Pass loop iteration (from executor uniform)")
+        lines.append(f"    int v{iter_id} = u_loop_iteration;")
     
     return "\n".join(lines)
 

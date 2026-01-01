@@ -27,9 +27,15 @@ def emit_blur(op, ctx):
     input_idx = metadata.get('input_idx', 0)
     output_idx = metadata.get('output_idx', 1)
     
-    # Build input/output names
-    input_name = f"img_{input_idx}"
-    output_name = f"img_{output_idx}"
+    # Remap resource indices to binding slots using context's binding_map
+    binding_map = ctx.get('binding_map', {})
+    input_slot = binding_map.get(input_idx, input_idx)
+    output_slot = binding_map.get(output_idx, output_idx)
+    
+    # Build input/output names using remapped slots
+    input_name = f"img_{input_slot}"
+    output_name = f"img_{output_slot}"
+
     
     # Generate Gaussian weights
     sigma = radius / 3.0

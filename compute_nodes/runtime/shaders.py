@@ -128,6 +128,9 @@ class ShaderManager:
             shader_info.push_constant('INT', 'u_dispatch_height')
             shader_info.push_constant('INT', 'u_dispatch_depth')
             
+            # Push constant for multi-pass loop iteration index
+            shader_info.push_constant('INT', 'u_loop_iteration')
+            
             # Workgroup size based on dispatch dimensions, not resources
             # This prevents mismatch when sampling 3D from a 2D dispatch
             dispatch_d = dispatch_size[2] if dispatch_size else 1

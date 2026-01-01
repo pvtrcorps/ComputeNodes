@@ -6,6 +6,7 @@
 
 from ...ir.resources import ImageDesc, ResourceAccess
 from ...ir.types import DataType
+from ...ir.graph import _trace_resource_index
 
 
 def handle_output_image(node, ctx):
@@ -53,9 +54,16 @@ def handle_output_image(node, ctx):
         )
     
     # Find the source resource to get dimensions
+    # Trace through PASS_LOOP_END if needed (when Grid comes from a repeat zone)
     source_resource = None
-    if val_data.resource_index is not None:
-        source_resource = builder.graph.resources[val_data.resource_index]
+    res_idx = val_data.resource_index
+    
+    if res_idx is None and val_data.origin is not None:
+        # Trace through origin chain to find actual resource
+        res_idx = _trace_resource_index(val_data)
+    
+    if res_idx is not None and res_idx < len(builder.graph.resources):
+        source_resource = builder.graph.resources[res_idx]
     
     # Get dimensions from source texture
     if source_resource and hasattr(source_resource, 'size'):

@@ -133,7 +133,7 @@ def handle_capture(node, ctx):
     desc = ImageDesc(
         name=output_name,
         access=ResourceAccess.READ_WRITE,
-        format="rgba32f",
+        format="RGBA32F",
         size=size,
         dimensions=dims,
         dynamic_size=is_dynamic,

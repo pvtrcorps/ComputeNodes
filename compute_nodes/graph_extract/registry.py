@@ -13,6 +13,7 @@ from .handlers.resize import handle_resize
 from .handlers.rasterize import handle_capture
 from .handlers.viewer import handle_viewer
 from .handlers.nodegroup import handle_nodegroup, handle_group_input, handle_group_output
+from .handlers.reroute import handle_reroute
 
 # Registry mapping node bl_idname to handler function
 HANDLER_REGISTRY = {
@@ -60,6 +61,9 @@ HANDLER_REGISTRY = {
     
     # Debug
     'ComputeNodeViewer': handle_viewer,
+    
+    # Layout
+    'NodeReroute': handle_reroute,
 }
 
 def get_handler(bl_idname):

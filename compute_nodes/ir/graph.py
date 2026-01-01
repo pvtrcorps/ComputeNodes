@@ -6,6 +6,66 @@ from .types import DataType
 from .ops import OpCode, infer_binary_type
 from .resources import ResourceDesc, ResourceType
 
+
+def _trace_resource_index(val) -> Optional[int]:
+    """
+    Trace back through SSA origin chain to find the underlying resource index.
+    
+    Handles values from PASS_LOOP_END (pong buffers) and PASS_LOOP_READ (ping buffers).
+    """
+    if val is None:
+        return None
+    
+    # Direct resource reference
+    if hasattr(val, 'resource_index') and val.resource_index is not None:
+        return val.resource_index
+    
+    # Trace through origin
+    if val.origin is not None:
+        op = val.origin
+        
+        # PASS_LOOP_END: Output corresponds to state variables with pong buffer
+        if op.opcode == OpCode.PASS_LOOP_END:
+            metadata = getattr(op, 'metadata', {})
+            state_vars = metadata.get('state_vars', [])
+            
+            # Find which output index this value is
+            for i, out_val in enumerate(op.outputs):
+                if out_val is val and i < len(state_vars):
+                    state = state_vars[i]
+                    state = state_vars[i]
+                    # Return pong_idx (output buffer for loop)
+                    # Handle both dict (legacy) and StateVar object
+                    pong_idx = state.get('pong_idx') if isinstance(state, dict) else getattr(state, 'pong_idx', None)
+                    if pong_idx is not None:
+                        return pong_idx
+                    
+                    ping_idx = state.get('ping_idx') if isinstance(state, dict) else getattr(state, 'ping_idx', None)
+                    if ping_idx is not None:
+                        return ping_idx
+                    break
+            
+            # Fallback: trace through inputs
+            for inp in op.inputs:
+                res_idx = _trace_resource_index(inp)
+                if res_idx is not None:
+                    return res_idx
+        
+        # PASS_LOOP_READ: Get from output's resource_index or metadata
+        elif op.opcode == OpCode.PASS_LOOP_READ:
+            if op.outputs and op.outputs[0].resource_index is not None:
+                return op.outputs[0].resource_index
+        
+        # Other ops: trace through HANDLE inputs
+        elif op.inputs:
+            for inp in op.inputs:
+                if hasattr(inp, 'type') and inp.type == DataType.HANDLE:
+                    res_idx = _trace_resource_index(inp)
+                    if res_idx is not None:
+                        return res_idx
+    
+    return None
+
 class ValueKind(Enum):
     SSA = auto()      # Produced by an Op
     CONSTANT = auto() # Literal constant
@@ -78,8 +138,15 @@ class Op:
         if self.opcode in {OpCode.IMAGE_LOAD, OpCode.SAMPLE, OpCode.IMAGE_SIZE}:
             img_val = self.inputs[0]
             # Check both ARGUMENT and SSA values with resource_index
-            if img_val.resource_index is not None:
-                indices.append(img_val.resource_index)
+            res_idx = img_val.resource_index
+            
+            # If resource_index is None, trace through origin chain
+            # This handles PASS_LOOP_END outputs that reference ping-pong buffers
+            if res_idx is None and img_val.origin is not None:
+                res_idx = _trace_resource_index(img_val)
+            
+            if res_idx is not None:
+                indices.append(res_idx)
         elif self.opcode == OpCode.BUFFER_READ:
              buf_val = self.inputs[0]
              if buf_val.resource_index is not None:

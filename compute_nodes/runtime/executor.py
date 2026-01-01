@@ -163,14 +163,6 @@ class ComputeExecutor:
             src = gen.generate(compute_pass)
             compute_pass.source = src
         
-        # DEBUG: Log resource usage for this pass
-        print(f"[DEBUG] Pass {compute_pass.id}: reads_idx={compute_pass.reads_idx}, writes_idx={compute_pass.writes_idx}")
-        for op in compute_pass.ops:
-            op_reads = op.reads_resources()
-            op_writes = op.writes_resources()
-            if op_reads or op_writes:
-                print(f"[DEBUG]   Op {op.opcode.name}: reads={op_reads}, writes={op_writes}, inputs[0].resource_index={op.inputs[0].resource_index if op.inputs else None}")
-        
         # Pass read/write indices for correct sampler vs image bindings
         shader = self.shader_mgr.get_shader(
             src, 
@@ -284,8 +276,11 @@ class ComputeExecutor:
             shader.uniform_int("u_dispatch_width", dispatch_w)
             shader.uniform_int("u_dispatch_height", dispatch_h)
             shader.uniform_int("u_dispatch_depth", dispatch_d)
+            # Loop iteration index (0 for non-loop passes, set by _run_pass_loop for loops)
+            loop_iter = getattr(compute_pass, '_current_loop_iteration', 0)
+            shader.uniform_int("u_loop_iteration", loop_iter)
         except Exception as e:
-            logger.debug(f"Could not set dispatch uniforms: {e}")
+            logger.debug(f"Could not set uniforms: {e}")
         
         # PROFILING: Start Timer
         should_profile = getattr(graph, 'profile_execution', False)
@@ -374,14 +369,17 @@ class ComputeExecutor:
         ping_pong_buffers = {}
         for state in loop.state_vars:
             if state.is_grid and state.ping_idx is not None and state.pong_idx is not None:
+                # Get format from state (inherited from source resource, defaults to RGBA32F)
+                fmt = getattr(state, 'format', 'RGBA32F')
+                
                 # Ensure buffers exist in texture_map
                 if state.ping_idx not in texture_map:
-                    # Create buffer based on size
+                    # Create buffer based on size and format from state
                     size = state.size if state.size != (0, 0, 0) else (context_width, context_height, 1)
                     desc = ImageDesc(
                         name=f"loop_ping_{state.name}",
                         access='READ_WRITE',
-                        format='RGBA32F',
+                        format=fmt,
                         size=size,
                         dimensions=state.dimensions,
                         is_internal=True
@@ -394,7 +392,7 @@ class ComputeExecutor:
                     desc = ImageDesc(
                         name=f"loop_pong_{state.name}",
                         access='READ_WRITE',
-                        format='RGBA32F',
+                        format=fmt,
                         size=size,
                         dimensions=state.dimensions,
                         is_internal=True
@@ -438,6 +436,9 @@ class ComputeExecutor:
             
             # Execute body passes
             for body_pass in loop.body_passes:
+                # Set current iteration for uniform (u_loop_iteration)
+                body_pass._current_loop_iteration = iter_idx
+                
                 if isinstance(body_pass, PassLoop):
                     # Nested loop - recursive
                     self._run_pass_loop(graph, body_pass, texture_map, context_width, context_height)
@@ -472,8 +473,9 @@ class ComputeExecutor:
                             logger.info(f"Dynamic state resize: {state.name} {dst_size} -> {src_size}")
                             
                             # Get new buffer from dynamic pool
+                            fmt = getattr(state, 'format', 'RGBA32F')
                             new_buf = self.dynamic_pool.get_or_create(
-                                src_size, 'RGBA32F', state.dimensions
+                                src_size, fmt, state.dimensions
                             )
                             
                             # Update ping_pong_buffers with new sized buffer
@@ -481,7 +483,8 @@ class ComputeExecutor:
                             dst = new_buf
                     
                     # Copy from source to destination
-                    self._copy_texture(src_tex, dst)
+                    fmt = getattr(state, 'format', 'RGBA32F')
+                    self._copy_texture(src_tex, dst, format=fmt, dimensions=state.dimensions)
             
             # Handle dynamic-sized resources: evaluate expressions and swap textures
             for res_idx, res_desc in self._dynamic_resources.items():
@@ -605,48 +608,84 @@ class ComputeExecutor:
         
         return (width, height)
 
-    def _copy_texture(self, src, dst):
+    def _copy_texture(self, src, dst, format='RGBA32F', dimensions=2):
         """Copy contents from one texture to another using a compute shader."""
         import math
         
         # Get dimensions
         width = src.width
         height = src.height
+        depth = 1
+        if dimensions == 3 and hasattr(src, 'depth'):
+            depth = src.depth
         
-        # Lazy-create copy shader
-        if not hasattr(self, '_copy_shader'):
-            self._create_copy_shader()
-        
-        shader = self._copy_shader
+        # Get specialized shader
+        shader = self._get_copy_shader(format, dimensions)
         shader.bind()
         
         shader.image('src_tex', src)
         shader.image('dst_tex', dst)
         
         # Dispatch
-        group_x = math.ceil(width / 16)
-        group_y = math.ceil(height / 16)
-        gpu.compute.dispatch(shader, group_x, group_y, 1)
+        if dimensions == 3:
+            # 3D Dispatch (8x8x8 local groups)
+            group_x = math.ceil(width / 8)
+            group_y = math.ceil(height / 8)
+            group_z = math.ceil(depth / 8)
+        else:
+            # 2D Dispatch (16x16 local groups)
+            group_x = math.ceil(width / 16)
+            group_y = math.ceil(height / 16)
+            group_z = 1
+            
+        gpu.compute.dispatch(shader, group_x, group_y, group_z)
         
         self._memory_barrier()
-        logger.debug(f"Texture copy: {src} -> {dst} ({width}x{height})")
+        logger.debug(f"Texture copy ({dimensions}D, {format}): {src} -> {dst} ({width}x{height}x{depth})")
     
-    def _create_copy_shader(self):
-        """Create compute shader for texture copy."""
-        copy_src = """
-void main() {
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    vec4 val = imageLoad(src_tex, coord);
-    imageStore(dst_tex, coord, val);
-}
-"""
+    def _get_copy_shader(self, format, dimensions):
+        """Get or create a cached copy shader for the given format/dimensions."""
+        # Initialize cache if needed
+        if not hasattr(self, '_copy_shader_cache'):
+            self._copy_shader_cache = {}
+            
+        key = (format, dimensions)
+        if key in self._copy_shader_cache:
+            return self._copy_shader_cache[key]
+        
+        # Generate Shader
+        is_3d = (dimensions == 3)
+        img_type = 'FLOAT_3D' if is_3d else 'FLOAT_2D'
+        coord_type = 'ivec3' if is_3d else 'ivec2'
+        load_coord = 'ivec3(gl_GlobalInvocationID.xyz)' if is_3d else 'ivec2(gl_GlobalInvocationID.xy)'
+        
+        copy_src = f"""
+        void main() {{
+            {coord_type} coord = {load_coord};
+            vec4 val = imageLoad(src_tex, coord);
+            imageStore(dst_tex, coord, val);
+        }}
+        """
+        
         shader_info = gpu.types.GPUShaderCreateInfo()
-        shader_info.image(0, 'RGBA32F', 'FLOAT_2D', 'src_tex', qualifiers={'READ'})
-        shader_info.image(1, 'RGBA32F', 'FLOAT_2D', 'dst_tex', qualifiers={'WRITE'})
-        shader_info.local_group_size(16, 16, 1)
+        shader_info.image(0, format, img_type, 'src_tex', qualifiers={'READ'})
+        shader_info.image(1, format, img_type, 'dst_tex', qualifiers={'WRITE'})
+        
+        if is_3d:
+            shader_info.local_group_size(8, 8, 8)
+        else:
+            shader_info.local_group_size(16, 16, 1)
+            
         shader_info.compute_source(copy_src)
         
-        self._copy_shader = gpu.shader.create_from_info(shader_info)
+        try:
+            shader = gpu.shader.create_from_info(shader_info)
+            self._copy_shader_cache[key] = shader
+            logger.debug(f"Created copy shader: {format} {dimensions}D")
+            return shader
+        except Exception as e:
+            logger.error(f"Failed to compile copy shader ({format}, {dimensions}D): {e}")
+            raise
         logger.debug("Created texture copy shader")
 
     def _memory_barrier(self):

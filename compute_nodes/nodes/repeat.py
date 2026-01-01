@@ -23,14 +23,68 @@ from ..utils.sockets import with_sync_guard
 # PropertyGroup for Repeat State Items
 # =============================================================================
 
+def update_repeat_item_name(self, context):
+    """Callback when a repeat state name changes."""
+    # Find the node that owns this item
+    # Since we can't easily get the owner from PropertyGroup, we assume
+    # the active node is the one being edited (or its pair)
+    node = context.active_node
+    if not node:
+        return
+
+    # If we are editing via the Output node, switch to Input node (Source of Truth)
+    if node.bl_idname == 'ComputeNodeRepeatOutput':
+        if node.paired_input and node.paired_input in node.id_data.nodes:
+            node = node.id_data.nodes[node.paired_input]
+    
+    # Verify this item belongs to the node
+    index = -1
+    for i, item in enumerate(node.repeat_items):
+        if item == self:
+            index = i
+            break
+    
+    if index == -1:
+        return
+        
+    # Rename sockets on Input Node (preserving links)
+    # Input Node: [Iterations, Item0, Item1... Empty]
+    if 1 + index < len(node.inputs) - 1:
+        node.inputs[1 + index].name = self.name
+    
+    # Input Node Outputs: [Iteration, Item0, Item1... Empty]
+    if 1 + index < len(node.outputs) - 1:
+        node.outputs[1 + index].name = self.name
+        
+    # Sync to Paired Output Node
+    if node.paired_output and node.paired_output in node.id_data.nodes:
+        pair = node.id_data.nodes[node.paired_output]
+        
+        # Update Pair Item Name (Mirror)
+        if index < len(pair.repeat_items):
+            # Avoid recursion if name is already set
+            if pair.repeat_items[index].name != self.name:
+                pair.repeat_items[index].name = self.name
+                
+        # Rename Pair Sockets
+        # Output Node: [Item0... Empty] (No Iterations input)
+        if index < len(pair.inputs) - 1:
+            pair.inputs[index].name = self.name
+            
+        if index < len(pair.outputs) - 1:
+            pair.outputs[index].name = self.name
+
+
 class ComputeRepeatItem(bpy.types.PropertyGroup):
     """A single state variable in a Repeat Zone."""
     
     name: StringProperty(
         name="Name",
         default="State",
-        description="Name of this state variable"
+        description="Name of this state variable",
+        update=update_repeat_item_name
     )
+
     
     socket_type: EnumProperty(
         name="Type",

@@ -13,8 +13,9 @@ def draw_header_controls(self, context):
     if not tree:
         return
         
-    # Spacer to separate from standard menus
-    layout.separator_spacer()
+    # Execution Controls Row
+    # We place them next to the menus (Left aligned)
+    # layout.separator_spacer() # Removed to align left
     
     # Execution Controls Row
     row = layout.row(align=True)

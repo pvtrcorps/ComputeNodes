@@ -86,7 +86,8 @@ def extract_graph(nodetree) -> Graph:
             if val is not None and val.type == DataType.HANDLE:
                 socket_type = getattr(socket, 'type', None)
                 # Field-expecting sockets: VALUE, VECTOR, RGBA
-                if socket_type in ('VALUE', 'VECTOR', 'RGBA', 'FLOAT'):
+                # EXCEPTION: NodeReroute sockets appear as RGBA but should pass-through Handles/Grids without sampling.
+                if socket_type in ('VALUE', 'VECTOR', 'RGBA', 'FLOAT') and socket.node.bl_idname != 'NodeReroute':
                     # Create normalized UV from gl_GlobalInvocationID
                     # Uses placeholder that emit_sample will expand inline
                     uv_placeholder = builder.constant((0.5, 0.5), DataType.VEC2)

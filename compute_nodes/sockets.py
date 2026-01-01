@@ -48,8 +48,74 @@ class ComputeSocketEmpty(NodeSocket):
     def draw(self, context, layout, node, text):
         layout.label(text="") # No text
 
+class ComputeSocketReroute(NodeSocket):
+    """
+    Custom socket for Reroute nodes that dynamically adapts its color
+    based on the connected socket type by recursively tracing the connection chain.
+    """
+    bl_idname = 'ComputeSocketReroute'
+    bl_label = 'Reroute'
+    
+    def draw(self, context, layout, node, text):
+        pass  # Reroute sockets don't draw content
+    
+    def draw_color(self, context, node):
+        """
+        Dynamically compute color by tracing back through the connection chain.
+        This ensures reroute nodes visually match their source socket type.
+        """
+        visited = set()
+        
+        def get_source_color(socket):
+            """Recursively find the source socket's color."""
+            # Prevent infinite loops
+            if socket in visited:
+                return None
+            visited.add(socket)
+            
+            # If not linked, return default gray
+            if not socket.is_linked:
+                return (0.5, 0.5, 0.5, 1.0)
+            
+            # Get the connected socket
+            link = socket.links[0]
+            source_socket = link.from_socket
+            
+            # If source is also a reroute, recurse
+            if source_socket.node.bl_idname == "NodeReroute":
+                target_socket = source_socket.node.inputs[0]
+                color = get_source_color(target_socket)
+                if color:
+                    return color
+            else:
+                # Found the actual source - use its draw_color if available
+                if hasattr(source_socket, 'draw_color'):
+                    return source_socket.draw_color(context, source_socket.node)
+                # Fallback to standard socket colors
+                elif hasattr(source_socket, 'type'):
+                    # Standard Blender socket type colors
+                    type_colors = {
+                        'VALUE': (0.63, 0.63, 0.63, 1.0),  # Gray
+                        'INT': (0.13, 0.52, 0.15, 1.0),     # Green
+                        'BOOLEAN': (0.8, 0.65, 0.84, 1.0),  # Pink
+                        'VECTOR': (0.39, 0.39, 0.78, 1.0),  # Blue
+                        'RGBA': (0.78, 0.78, 0.16, 1.0),    # Yellow
+                    }
+                    return type_colors.get(source_socket.type, (0.5, 0.5, 0.5, 1.0))
+            
+            return (0.5, 0.5, 0.5, 1.0)  # Fallback gray
+        
+        # Trace color from input
+        if self.node.inputs and self.node.inputs[0].is_linked:
+            color = get_source_color(self.node.inputs[0])
+            if color:
+                return color
+        
+        # Default gray for unconnected reroutes
+        return (0.5, 0.5, 0.5, 1.0)
+
 # Export for registration
-socket_classes = [ComputeSocketGrid, ComputeSocketBuffer, ComputeSocketEmpty]
+socket_classes = [ComputeSocketGrid, ComputeSocketBuffer, ComputeSocketEmpty, ComputeSocketReroute]
 
 def map_socket_type(interface_type):
     """Map Blender interface socket type to our socket types."""

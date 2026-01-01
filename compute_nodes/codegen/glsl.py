@@ -215,6 +215,8 @@ class ShaderGenerator:
             # Pass-specific read/write info for sampler vs image detection
             'reads_idx': dispatch.reads_idx if dispatch else set(),
             'writes_idx': dispatch.writes_idx if dispatch else set(),
+            # Binding map for resource index -> sequential slot mapping
+            'binding_map': self._binding_map,
         }
         
         emitter = get_emitter(op.opcode)
