@@ -120,35 +120,7 @@ from bpy.app.handlers import persistent
 
 
 
-class COMPUTE_PT_MainPanel(bpy.types.Panel):
-    """Creates a Panel in the Compute Node Editor"""
-    bl_label = "Compute Runtime"
-    bl_idname = "COMPUTE_PT_main"
-    bl_space_type = 'NODE_EDITOR'
-    bl_region_type = 'UI'
-    bl_category = "Compute"
 
-    @classmethod
-    def poll(cls, context):
-        return context.space_data.tree_type == 'ComputeNodeTree'
-
-    def draw(self, context):
-        layout = self.layout
-        tree = context.space_data.node_tree
-        
-        row = layout.row(align=True)
-        row.operator("compute.execute_graph", icon='PLAY')
-        
-        if tree:
-            row.prop(tree, "auto_execute", text="", icon='FILE_REFRESH')
-            
-            # Profiling Controls
-            row = layout.row(align=True)
-            row.prop(tree, "profile_execution", toggle=True, icon='TIME')
-            if tree.profile_execution:
-                row.label(text=f"{tree.execution_time_total:.2f} ms")
-
-# ============================================================================
 # UI LIST & PANELS
 # ============================================================================
 
@@ -387,7 +359,6 @@ classes = (
     ComputeExecuteOperator,
     COMPUTE_OT_add_group_socket,
     COMPUTE_OT_move_group_socket,
-    COMPUTE_PT_MainPanel,
     COMPUTE_UL_interface_sockets,
     COMPUTE_PT_group_interface,
     NODE_PT_node_tree_interface,
