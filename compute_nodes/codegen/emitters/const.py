@@ -56,6 +56,6 @@ def format_constant(value, dtype: DataType) -> str:
                 elif len(value) == 4:
                     return f"vec4({float(value[0])}, {float(value[1])}, {float(value[2])}, {float(value[3])})"
             return "0.0"
-        except:
+        except Exception:
             return "0.0"
 

@@ -56,5 +56,5 @@ def register():
 def unregister():
     try:
         bpy.types.NODE_HT_header.remove(draw_header_controls)
-    except:
+    except Exception:
         pass

@@ -221,7 +221,7 @@ class COMPUTE_OT_add_group_socket(bpy.types.Operator):
             for node in tree.nodes:
                 if hasattr(node, "sync_from_interface"):
                     node.sync_from_interface()
-        except:
+        except Exception:
             pass
             
         return {'FINISHED'}
@@ -256,7 +256,7 @@ class COMPUTE_OT_move_group_socket(bpy.types.Operator):
                 for node in tree.nodes:
                     if hasattr(node, "sync_from_interface"):
                         node.sync_from_interface()
-            except:
+            except Exception:
                 pass
                 
         return {'FINISHED'}
@@ -430,5 +430,5 @@ def unregister():
     for cls in reversed(classes):
         try:
             bpy.utils.unregister_class(cls)
-        except:
+        except Exception:
             pass

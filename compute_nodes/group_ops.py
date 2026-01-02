@@ -81,7 +81,7 @@ class COMPUTE_OT_group_make(bpy.types.Operator):
                 for prop in old_node.bl_rna.properties:
                     if not prop.is_readonly:
                         setattr(new_node, prop.identifier, getattr(old_node, prop.identifier))
-            except:
+            except Exception:
                 pass
             
             old_to_new[old_node.name] = new_node
@@ -115,7 +115,7 @@ class COMPUTE_OT_group_make(bpy.types.Operator):
                             src = new_node.outputs[out_sock.name]
                             dst = to_new_node.inputs[link.to_socket.name]
                             group_tree.links.new(src, dst)
-                        except:
+                        except Exception:
                             pass
         
         # 5. Handle Boundary Links (Inputs)
@@ -287,7 +287,7 @@ class COMPUTE_OT_group_ungroup(bpy.types.Operator):
                 for prop in old_node.bl_rna.properties:
                     if not prop.is_readonly:
                         setattr(new_node, prop.identifier, getattr(old_node, prop.identifier))
-            except:
+            except Exception:
                 pass
             
             old_to_new[old_node.name] = new_node

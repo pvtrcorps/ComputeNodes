@@ -2,6 +2,9 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Rasterizer:
     """
@@ -33,7 +36,7 @@ class Rasterizer:
             self._width = width
             self._height = height
         except Exception as e:
-            print(f"Rasterizer: Failed to create offscreen {width}x{height}: {e}")
+            logger.error(f"Rasterizer: Failed to create offscreen {width}x{height}: {e}")
             raise
 
     # -------------------------------------------------------------------------
@@ -107,7 +110,7 @@ class Rasterizer:
             uv_layer = mesh.uv_layers.active
             
         if not uv_layer:
-            print("Rasterizer: No UV map found.")
+            logger.warning("Rasterizer: No UV map found.")
             return None 
 
         # 2. Get Attribute
@@ -120,7 +123,7 @@ class Rasterizer:
         if not attr:
              # Fallback: Check if it's a special attribute like "position" logic handled by shader?
              # For now return None
-             print(f"Rasterizer: Attribute {attribute_name} not found.")
+             logger.warning(f"Rasterizer: Attribute {attribute_name} not found.")
              return None
 
         # 3. Extract Data
@@ -309,7 +312,7 @@ class Rasterizer:
         self._ensure_offscreen(width, height)
         
         if not camera or camera.type != 'CAMERA':
-            print("Rasterizer: Invalid camera.")
+            logger.warning("Rasterizer: Invalid camera.")
             return None
             
         # 1. Calc Matrices
