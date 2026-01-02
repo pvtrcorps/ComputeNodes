@@ -150,13 +150,13 @@ class ShaderManager:
             return shader
             
         except Exception as e:
-            logger.error(f"Shader compile error: {e}")
+            print(f"Shader compile error: {e}")
             # Log source for debugging
-            logger.error("--- SHADER SOURCE ---")
+            print("--- SHADER SOURCE ---")
             lines = source.split('\n')
             for i, line in enumerate(lines):
-                logger.error(f"{i+1:03d}: {line}")
-            logger.error("---------------------")
+                print(f"{i+1:03d}: {line}")
+            print("---------------------")
             raise
 
     def clear(self):

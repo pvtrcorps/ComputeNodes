@@ -132,7 +132,7 @@ def get_zone_color():
         theme = bpy.context.preferences.themes[0]
         color = theme.node_editor.repeat_zone
         return tuple(color)  # (R, G, B, A)
-    except Exception:
+    except:
         # Fallback to default orange
         return (0.7, 0.3, 0.1, 0.25)
 

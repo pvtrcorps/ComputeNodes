@@ -70,12 +70,13 @@ def extract_graph(nodetree) -> Graph:
         """
         key = get_socket_key(socket)
         if hasattr(socket, 'name'):
-             pass
+             pass # print(f"DEBUG_CORE: get_socket_value {socket.name} (Node: {socket.node.name if hasattr(socket, 'node') and socket.node else 'None'}). Linked: {socket.is_linked}")
 
         if key in socket_value_map:
             return socket_value_map[key]
             
-
+        # print(f"DEBUG: get_socket_value {socket.name} (Node: {socket.node.name}). Linked: {socket.is_linked}")
+            
         # If linked, traverse
         if socket.is_linked:
             if len(socket.links) > 1:
