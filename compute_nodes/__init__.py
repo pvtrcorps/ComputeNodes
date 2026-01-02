@@ -18,7 +18,6 @@ classes = [
 
 from . import categories
 from . import operators
-from . import panels  # UI panels and lists
 from . import group_ops
 from . import ui  # Zone drawing, keymaps, etc.
 
@@ -27,7 +26,6 @@ def register():
         bpy.utils.register_class(cls)
     categories.register()
     operators.register()
-    panels.register()  # UI panels and lists
     group_ops.register()
     # Register repeat module extras (operators, panel)
     repeat_module.register()
@@ -41,7 +39,6 @@ def unregister():
     nodegroup_module.unregister()
     repeat_module.unregister()
     group_ops.unregister()
-    panels.unregister()  # UI panels and lists
     operators.unregister()
     categories.unregister()
     for cls in reversed(classes):
