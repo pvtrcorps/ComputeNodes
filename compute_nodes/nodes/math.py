@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import EnumProperty
+from bpy.props import EnumProperty, BoolProperty
 from ..nodetree import ComputeNode
 
 class ComputeNodeMath(ComputeNode):
@@ -56,6 +56,12 @@ class ComputeNodeMath(ComputeNode):
         update=lambda s,c: s.update_sockets(c)
     )
     
+    use_clamp: BoolProperty(
+        name="Clamp",
+        description="Clamp the result to the range [0.0, 1.0]",
+        default=False
+    )
+    
     def update_sockets(self, context):
         op = self.operation
         
@@ -104,6 +110,7 @@ class ComputeNodeMath(ComputeNode):
         
     def draw_buttons(self, context, layout):
         layout.prop(self, "operation")
+        layout.prop(self, "use_clamp")
         
     def draw_label(self):
         self._draw_node_color()

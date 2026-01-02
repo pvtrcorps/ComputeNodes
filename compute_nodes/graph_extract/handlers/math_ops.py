@@ -45,6 +45,16 @@ def handle_math(node, ctx):
         raise TypeError(f"Node '{node.name}': {e}") from e
     
     ctx.set_output(0, val_out)
+    
+    # Handle Clamp
+    if getattr(node, 'use_clamp', False):
+        op_clamp = builder.add_op(OpCode.CLAMP, [val_out, builder.constant(0.0, DataType.FLOAT), builder.constant(1.0, DataType.FLOAT)])
+        val_clamped = builder._new_value(ValueKind.SSA, DataType.FLOAT, origin=op_clamp)
+        op_clamp.add_output(val_clamped)
+        # Update output to use clamped value
+        ctx.set_output(0, val_clamped)
+        return val_clamped
+        
     return val_out
 
 
@@ -65,6 +75,8 @@ def handle_vector_math(node, ctx):
         'COSINE': OpCode.COS,
         'TANGENT': OpCode.TAN,
         'FRACTION': OpCode.FRACT,
+        'POWER': OpCode.POW,
+        'SIGN': OpCode.SIGN,
     }
     opcode = op_map.get(op_str)
     if opcode is None:
@@ -76,7 +88,7 @@ def handle_vector_math(node, ctx):
     inputs = [val_a, val_b]
     
     # Unary
-    if opcode in {OpCode.LENGTH, OpCode.NORMALIZE, OpCode.ABS, OpCode.FLOOR, OpCode.CEIL, OpCode.FRACT, OpCode.SIN, OpCode.COS, OpCode.TAN}:
+    if opcode in {OpCode.LENGTH, OpCode.NORMALIZE, OpCode.ABS, OpCode.FLOOR, OpCode.CEIL, OpCode.FRACT, OpCode.SIN, OpCode.COS, OpCode.TAN, OpCode.SIGN}:
         inputs = [val_a]
     
     # Ternary

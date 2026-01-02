@@ -302,38 +302,92 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List, graph=Non
         flush_ops()
         return result_list
     
-    # CRITICAL FIX: When hazard detection splits a loop region into multiple passes,
-    # we need to merge ALL ops and parse once, not process passes individually.
-    # Otherwise, LOOP_BEGIN may be in Pass 0, LOOP_END in Pass 3, and ops between
-    # them get incorrectly structured.
+    # Simplified approach: Group existing passes into PassLoop without recreating
+    # This preserves all pass metadata and avoids the merge→parse→recreate cycle
     
-    # First, merge all ops from all passes that contain any loop markers
-    all_ops = []
-    
-    # Check if ANY pass has loop markers - if so, we need unified processing
+    # Check if ANY pass has loop markers
     any_loop_markers = any(
         any(op.opcode in (OpCode.PASS_LOOP_BEGIN, OpCode.PASS_LOOP_END) for op in p.ops)
         for p in passes
     )
     
-    if any_loop_markers:
-        # Merge all ops from all passes, deduplicating to prevent issues from Phase 2 field deps
-        # Phase 2 in scheduler.py adds field dependencies to each pass, which means the same op
-        # can appear in multiple passes. We need to deduplicate while preserving order.
-        all_ops = []
-        seen_op_ids = set()
-        for p in passes:
-            for op in p.ops:
-                if id(op) not in seen_op_ids:
-                    all_ops.append(op)
-                    seen_op_ids.add(id(op))
+    if not any_loop_markers:
+        # No loops - return passes as-is
+        return list(passes)
+    
+    # Group passes into loop regions
+    result = []
+    i = 0
+    
+    while i < len(passes):
+        p = passes[i]
         
-        # Parse the merged ops
-        parsed_items, _ = parse_ops_recursive(all_ops, 0)
-        result = items_to_passes(parsed_items)
-    else:
-        # No loops - just return passes as-is
-        result = list(passes)
+        # Check if this pass contains a LOOP_BEGIN
+        contains_begin = any(op.opcode == OpCode.PASS_LOOP_BEGIN for op in p.ops)
+        
+        if not contains_begin:
+            # Regular pass outside any loop
+            result.append(p)
+            i += 1
+            continue
+        
+        # Find the LOOP_BEGIN op to get metadata
+        begin_op = next(op for op in p.ops if op.opcode == OpCode.PASS_LOOP_BEGIN)
+        iterations = begin_op.attrs.get('iterations', 1)
+        
+        # Collect all passes in this loop (from LOOP_BEGIN to LOOP_END)
+        loop_body = []
+        loop_started = False
+        
+        while i < len(passes):
+            current = passes[i]
+            
+            # Check for loop markers in this pass
+            has_begin = any(op.opcode == OpCode.PASS_LOOP_BEGIN for op in current.ops)
+            has_end = any(op.opcode == OpCode.PASS_LOOP_END for op in current.ops)
+            
+            if has_begin:
+                loop_started = True
+            
+            # Add pass to loop body (excluding marker ops)
+            # Filter out LOOP_BEGIN and LOOP_END ops from the pass
+            filtered_ops = [op for op in current.ops 
+                          if op.opcode not in (OpCode.PASS_LOOP_BEGIN, OpCode.PASS_LOOP_END)]
+            
+            if filtered_ops:
+                # Create a cleaned pass without loop marker ops
+                from ..planner.passes import ComputePass
+                cleaned_pass = ComputePass(pass_id=current.id)
+                cleaned_pass.ops = filtered_ops
+                cleaned_pass.dispatch_size = current.dispatch_size
+                # Copy resource tracking
+                cleaned_pass.reads = current.reads.copy()
+                cleaned_pass.writes = current.writes.copy()
+                cleaned_pass.reads_idx = current.reads_idx.copy()
+                cleaned_pass.writes_idx = current.writes_idx.copy()
+                
+                loop_body.append(cleaned_pass)
+            
+            i += 1
+            
+            if has_end:
+                break
+        
+        # Extract state resources from loop body
+        state_resources = set()
+        for bp in loop_body:
+            # State resources are those written and then read within the loop
+            state_resources.update(bp.reads_idx & bp.writes_idx)
+        
+        # Create PassLoop wrapping the collected passes
+        loop = PassLoop(
+            iterations=iterations,
+            body_passes=loop_body,
+            state_vars=[]  # Will be populated by executor based on state_resources
+        )
+        
+        result.append(loop)
     
     return result
+
 
