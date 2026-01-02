@@ -16,7 +16,6 @@ class ComputeNodeVectorMath(ComputeNode):
             ('MUL', "Multiply", "A * B"),
             ('DIV', "Divide", "A / B"),
             ('MULTIPLY_ADD', "Multiply Add", "A * B + C"),
-            ('POWER', "Power", "A ^ B"),
             ('CROSS', "Cross Product", "A x B"),
             ('PROJECT', "Project", "Project A onto B"),
             ('REFLECT', "Reflect", "Reflect A around B"),
@@ -28,7 +27,6 @@ class ComputeNodeVectorMath(ComputeNode):
             ('SCALE', "Scale", "A * Scale"),
             ('NORMALIZE', "Normalize", "Normalize A"),
             ('ABS', "Absolute", "abs(A)"),
-            ('SIGN', "Sign", "sign(A)"),
             ('MIN', "Minimum", "min(A, B)"),
             ('MAX', "Maximum", "max(A, B)"),
             ('FLOOR', "Floor", "floor(A)"),
@@ -51,7 +49,7 @@ class ComputeNodeVectorMath(ComputeNode):
         # 1-Input (Unary)
         unary_ops = {
             'LENGTH', 'NORMALIZE', 'ABS', 'FLOOR', 'CEIL', 'FRACT', 
-            'SINE', 'COSINE', 'TANGENT', 'SIGN'
+            'SINE', 'COSINE', 'TANGENT'
         }
         
         # 3-Input (Ternary)
