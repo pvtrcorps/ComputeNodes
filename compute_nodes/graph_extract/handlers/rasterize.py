@@ -124,7 +124,16 @@ def handle_capture(node, ctx):
         size = (width_val, height_val)
     
     # Create output Grid (ImageDesc)
-    output_name = f"grid_{node.name}"
+    # Use scope path to ensure unique names for resources inside groups
+    scope_path = ctx.extra.get('scope_path', [])
+    
+    if scope_path:
+        # Join with slash to create distinct path (e.g. "Group/Capture")
+        # Spaces are preserved since GLSL generator doesn't use this name as identifier
+        full_name = "/".join(scope_path + [node.name])
+        output_name = f"grid_{full_name}"
+    else:
+        output_name = f"grid_{node.name}"
     desc = ImageDesc(
         name=output_name,
         access=ResourceAccess.READ_WRITE,

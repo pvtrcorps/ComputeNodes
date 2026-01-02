@@ -57,10 +57,24 @@ def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
     dirtied_resources: Set[int] = set()
     op_to_pass: Dict[int, int] = {}  # Track which pass each op was originally assigned to
     
+    # Maximum unique resources per pass (GPU binding limit is typically 8)
+    MAX_RESOURCES_PER_PASS = 7
+    
     for op in ops:
         # Check for Hazards
         # Does this op read something written in current pass?
-        if find_hazards(op, dirtied_resources):
+        should_split = find_hazards(op, dirtied_resources)
+        
+        # Also check resource limit - prevent exceeding GPU binding slots
+        if not should_split:
+            op_reads = set(op.reads_resources())
+            op_writes = set(op.writes_resources())
+            future_resources = (current_pass.reads_idx | current_pass.writes_idx | 
+                               op_reads | op_writes)
+            if len(future_resources) > MAX_RESOURCES_PER_PASS:
+                should_split = True
+        
+        if should_split:
             # SPLIT PASS
             passes.append(current_pass)
             new_id = len(passes)
@@ -140,7 +154,47 @@ def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
     if loop_regions:
         passes = wrap_passes_in_loops(passes, loop_regions, ops, graph)
         
+        # PHASE 4.5: Re-apply field dependency propagation to loop body passes
+        # wrap_passes_in_loops recreates passes from raw ops, losing Phase 2 deps
+        _propagate_field_deps_recursive(passes, graph)
+        
     return passes
+
+
+def _propagate_field_deps_to_pass(p: ComputePass, graph: Graph):
+    """Apply field dependency propagation to a single pass."""
+    ops_in_pass = {id(op) for op in p.ops}
+    deps_to_add = []
+    collected = set()
+    
+    for op in p.ops:
+        collect_field_dependencies(op, collected, deps_to_add)
+    
+    # Filter to deps NOT already in this pass
+    new_deps = [dep for dep in deps_to_add if id(dep) not in ops_in_pass]
+    
+    # Prepend all new deps at once (preserves order)
+    if new_deps:
+        p.ops = new_deps + p.ops
+        # Update reads/writes for new deps
+        for dep in new_deps:
+            for res_idx in dep.reads_resources():
+                res = graph.resources[res_idx]
+                p.reads.add(res)
+                p.reads_idx.add(res_idx)
+            for res_idx in dep.writes_resources():
+                res = graph.resources[res_idx]
+                p.writes.add(res)
+                p.writes_idx.add(res_idx)
+
+
+def _propagate_field_deps_recursive(passes, graph: Graph):
+    """Recursively apply field dependency propagation to all passes including loop bodies."""
+    for item in passes:
+        if hasattr(item, 'body_passes'):  # PassLoop
+            _propagate_field_deps_recursive(item.body_passes, graph)
+        else:  # ComputePass
+            _propagate_field_deps_to_pass(item, graph)
 
 
 def _calculate_dispatch_size(compute_pass: ComputePass, graph: Graph):

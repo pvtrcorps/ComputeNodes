@@ -44,7 +44,8 @@ class ComputeExecutor:
         
         # Phase 2: Execute Passes (handles both ComputePass and PassLoop)
         for item in passes:
-            if isinstance(item, PassLoop):
+            # Robust check for Loop (handles reloading class mismatch)
+            if 'PassLoop' in str(type(item)) or hasattr(item, 'body_passes'):
                 self._run_pass_loop(graph, item, texture_map, context_width, context_height)
             else:
                 self._run_pass(graph, item, texture_map, context_width, context_height)
@@ -439,7 +440,8 @@ class ComputeExecutor:
                 # Set current iteration for uniform (u_loop_iteration)
                 body_pass._current_loop_iteration = iter_idx
                 
-                if isinstance(body_pass, PassLoop):
+                # logger.info(f"DEBUG: Processing body item type: {type(body_pass)}")
+                if 'PassLoop' in str(type(body_pass)) or hasattr(body_pass, 'body_passes'):
                     # Nested loop - recursive
                     self._run_pass_loop(graph, body_pass, texture_map, context_width, context_height)
                 else:

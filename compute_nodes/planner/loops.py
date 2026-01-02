@@ -160,47 +160,57 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List, graph=Non
         result_list = []
         current_ops = []
         
+        # Track resources for specific pass splitting logic
+        pass_reads = set()
+        pass_writes = set()
+        
+        # Track last safe split point (index in current_ops)
+        last_safe_split = 0
+        
+        def create_pass_from_ops(ops):
+            if not ops:
+                return
+            
+            cp = ComputePass(pass_id=new_pass_id())
+            cp.ops.extend(ops)
+            
+            # Default dispatch
+            cp.dispatch_size = (0, 0, 0)
+            
+            max_w, max_h, max_d = 0, 0, 1
+            
+            for op in ops:
+                for idx in op.reads_resources():
+                    cp.reads_idx.add(idx)
+                    if graph and idx < len(graph.resources):
+                        cp.reads.add(graph.resources[idx])
+                        
+                for idx in op.writes_resources():
+                    cp.writes_idx.add(idx)
+                    if graph and idx < len(graph.resources):
+                        res = graph.resources[idx]
+                        cp.writes.add(res)
+                        
+                        # Track max dimensions for dispatch
+                        if hasattr(res, 'width'):
+                            w = getattr(res, 'width', 0)
+                            h = getattr(res, 'height', 0)
+                            d = getattr(res, 'depth', 1)
+                            if w * h * d > max_w * max_h * max_d:
+                                max_w, max_h, max_d = w, h, d
+            
+            if max_w > 0:
+                cp.dispatch_size = (max_w, max_h, max_d)
+            
+            result_list.append(cp)
+
         def flush_ops():
-            nonlocal current_ops
-            if current_ops:
-                cp = ComputePass(pass_id=new_pass_id())
-                cp.ops.extend(current_ops)
-                
-                # Default dispatch
-                cp.dispatch_size = (0, 0, 0)
-                
-                max_w, max_h, max_d = 0, 0, 1
-                
-                for op in current_ops:
-                    for idx in op.reads_resources():
-                        cp.reads_idx.add(idx)
-                        if graph and idx < len(graph.resources):
-                            cp.reads.add(graph.resources[idx])
-                            
-                    for idx in op.writes_resources():
-                        cp.writes_idx.add(idx)
-                        if graph and idx < len(graph.resources):
-                            res = graph.resources[idx]
-                            cp.writes.add(res)
-                            
-                            # Track max dimensions for dispatch
-                            if hasattr(res, 'width'):
-                                w = getattr(res, 'width', 0)
-                                h = getattr(res, 'height', 0)
-                                d = getattr(res, 'depth', 1)
-                                if w * h * d > max_w * max_h * max_d:
-                                    max_w, max_h, max_d = w, h, d
-                
-                if max_w > 0:
-                    cp.dispatch_size = (max_w, max_h, max_d)
-                else:
-                    # Fallback/Inherit?
-                    # For loops, maybe we want to use the 'main' loop size if available?
-                    # But (0,0,0) allows runtime defaults.
-                    pass
-                            
-                result_list.append(cp)
-                current_ops = []
+            nonlocal current_ops, pass_reads, pass_writes, last_safe_split
+            create_pass_from_ops(current_ops)
+            current_ops = []
+            pass_reads.clear()
+            pass_writes.clear()
+            last_safe_split = 0
         
         for item in items:
             if isinstance(item, PassLoop):
@@ -211,7 +221,83 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List, graph=Non
                     delattr(item, '_raw_body_items')
                 result_list.append(item)
             else:
-                current_ops.append(item)
+                op = item
+                
+                # Analyze Op
+                op_reads = set(op.reads_resources())
+                op_writes = set(op.writes_resources())
+                
+                # Virtual Ops (Markers)
+                is_virtual = False
+                if hasattr(op, 'opcode') and hasattr(op.opcode, 'name'):
+                    if op.opcode.name in ('PASS_LOOP_BEGIN', 'PASS_LOOP_END', 'COMMENT'):
+                        is_virtual = True
+                
+                split_action = 'NONE' # NONE, FLUSH_NOW, BACKTRACK
+                
+                if not is_virtual:
+                    # 1. RAW Hazard (Must split immediately)
+                    if not op_reads.isdisjoint(pass_writes):
+                        split_action = 'FLUSH_NOW'
+                    
+                    # 2. Resource Limit (Backtrack if possible)
+                    if split_action == 'NONE':
+                        # Conservative counting: len(Reads) + len(Writes)
+                        # This assumes worst case where Read and Write of same resource use 2 bindings
+                        # (e.g. Sampler + ImageUnit), or just provides safety margin.
+                        
+                        future_reads = pass_reads.union(op_reads)
+                        future_writes = pass_writes.union(op_writes)
+                        
+                        # Max bindings (usually 8 or 16). Limit to 7 for safety margin.
+                        total_bindings = len(future_reads | future_writes)
+                        
+                        if total_bindings > 7:
+                            # Too many resources.
+                            if last_safe_split > 0:
+                                split_action = 'BACKTRACK'
+                            else:
+                                split_action = 'FLUSH_NOW'
+                
+                # Execute Split
+                if split_action == 'FLUSH_NOW':
+                    flush_ops()
+                    
+                if split_action == 'BACKTRACK':
+                    split_idx = last_safe_split
+                    ops_pre = current_ops[:split_idx]
+                    ops_post = current_ops[split_idx:]
+                    
+                    # Create pass from ops_pre (recalculates resources internally)
+                    create_pass_from_ops(ops_pre)
+                    
+                    # Reset accumulators with ops_post 
+                    # Note: 'op' will be appended after this block
+                    current_ops = ops_post
+                    
+                    # Recalculate for current_ops (post split)
+                    pass_reads = set()
+                    pass_writes = set()
+                    for post_op in current_ops:
+                        pass_reads.update(post_op.reads_resources())
+                        pass_writes.update(post_op.writes_resources())
+                        
+                    # Reset markers
+                    last_safe_split = 0
+                
+                # Add Op
+                current_ops.append(op)
+                pass_reads.update(op_reads)
+                pass_writes.update(op_writes)
+                
+                # Mark Safe Split Point (After Store/Capture)
+                # This ensures we don't split in the middle of a Field Chain
+                # Also treat Virtual ops as safe split points
+                if is_virtual:
+                    last_safe_split = len(current_ops)
+                elif hasattr(op, 'opcode') and hasattr(op.opcode, 'name'):
+                    if op.opcode.name == 'IMAGE_STORE':
+                        last_safe_split = len(current_ops)
         
         flush_ops()
         return result_list
@@ -231,9 +317,16 @@ def wrap_passes_in_loops(passes: List, regions: List[Dict], ops: List, graph=Non
     )
     
     if any_loop_markers:
-        # Merge all ops from all passes
+        # Merge all ops from all passes, deduplicating to prevent issues from Phase 2 field deps
+        # Phase 2 in scheduler.py adds field dependencies to each pass, which means the same op
+        # can appear in multiple passes. We need to deduplicate while preserving order.
+        all_ops = []
+        seen_op_ids = set()
         for p in passes:
-            all_ops.extend(p.ops)
+            for op in p.ops:
+                if id(op) not in seen_op_ids:
+                    all_ops.append(op)
+                    seen_op_ids.add(id(op))
         
         # Parse the merged ops
         parsed_items, _ = parse_ops_recursive(all_ops, 0)

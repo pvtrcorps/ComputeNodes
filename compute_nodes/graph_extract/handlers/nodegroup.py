@@ -79,6 +79,14 @@ def handle_nodegroup(node, ctx):
                     new_extra = ctx.extra.copy()
                     new_extra['output_socket_needed'] = from_socket
                     
+                    # === SCOPE TRACKING FIX ===
+                    # Propagate recursion scope to allow handlers to generate unique names
+                    current_scope = ctx.extra.get('scope_path', [])
+                    # Append current group node name to scope
+                    # Using raw name to avoid collision/ambiguity (Blender ensures names are unique)
+                    new_scope = current_scope + [node.name]
+                    new_extra['scope_path'] = new_scope
+                    
                     inner_ctx = NodeContext(
                         builder=builder,
                         node=from_node,

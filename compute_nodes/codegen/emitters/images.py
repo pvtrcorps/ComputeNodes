@@ -241,10 +241,22 @@ def emit_sample(op, ctx):
     if is_image_binding:
         # Resource is bound as image2D (also written in this pass)
         # Must use imageLoad with integer pixel coordinates
-        if is_3d:
-            coord = "ivec3(gl_GlobalInvocationID)"
+        
+        if uv_available:
+            # Convert normalized UV (0.0-1.0) to pixel coordinates
+            uv = param(uv_input)
+            if is_3d:
+                coord = f"ivec3({uv} * vec3(imageSize({sampler})))"
+            else:
+                # Take .xy for 2D sampling even if UV is vec3
+                coord = f"ivec2({uv}.xy * vec2(imageSize({sampler})))"
         else:
-            coord = "ivec2(gl_GlobalInvocationID.xy)"
+            # Fallback: read current pixel when no explicit UV
+            if is_3d:
+                coord = "ivec3(gl_GlobalInvocationID)"
+            else:
+                coord = "ivec2(gl_GlobalInvocationID.xy)"
+        
         return f"{lhs}imageLoad({sampler}, {coord});"
     else:
         # Resource is bound as sampler2D (read-only in this pass)
