@@ -128,8 +128,12 @@ class ShaderManager:
             shader_info.push_constant('INT', 'u_dispatch_height')
             shader_info.push_constant('INT', 'u_dispatch_depth')
             
-            # Push constant for multi-pass loop iteration index
+            # Push constant for multi-pass loop iteration index and buffer dimensions
             shader_info.push_constant('INT', 'u_loop_iteration')
+            shader_info.push_constant('INT', 'u_loop_read_width')
+            shader_info.push_constant('INT', 'u_loop_read_height')
+            shader_info.push_constant('INT', 'u_loop_write_width')
+            shader_info.push_constant('INT', 'u_loop_write_height')
             
             # Workgroup size based on dispatch dimensions, not resources
             # This prevents mismatch when sampling 3D from a 2D dispatch

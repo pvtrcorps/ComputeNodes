@@ -129,38 +129,62 @@ def emit_image_load(op, ctx):
 
 
 def emit_image_size(op, ctx):
-    """Emit imageSize operation - returns ivec3 for both 2D and 3D grids."""
+    """
+    Emit imageSize operation.
+    
+    Respects output type:
+    - IVEC2: returns ivec2(textureSize(img, 0)) or ivec2(imageSize(img))
+    - IVEC3: returns ivec3(textureSize(img, 0), 1) for 2D or ivec3(textureSize(img, 0)) for 3D
+    """
     lhs = ctx.lhs
     param = ctx.param
     graph = ctx.graph
     
     img = param(op.inputs[0])
     
-    # Detect resource dimensionality
+    # Detect resource dimensionality (2D vs 3D texture)
     res_idx = op.inputs[0].resource_index
-    is_3d = False
+    is_3d_texture = False
     if res_idx is not None and res_idx < len(graph.resources):
         res = graph.resources[res_idx]
-        is_3d = getattr(res, 'dimensions', 2) == 3
+        is_3d_texture = getattr(res, 'dimensions', 2) == 3
+    
+    # Check output type requested by IR
+    output_type = op.outputs[0].type if op.outputs else DataType.IVEC3
+    wants_ivec2 = (output_type == DataType.IVEC2)
     
     # Check if sampler or image binding
     writes_idx = ctx.writes_idx
+    is_sampler = res_idx is not None and res_idx not in writes_idx
     
-    if res_idx is not None:
-        # If not written, it's a sampler
-        if res_idx not in writes_idx:
-            if is_3d:
-                return f"{lhs}ivec3(textureSize({img}, 0));"
+    if is_sampler:
+        # Use textureSize for sampler bindings
+        if is_3d_texture:
+            # 3D texture returns ivec3
+            if wants_ivec2:
+                return f"{lhs}ivec2(textureSize({img}, 0).xy);"
             else:
-                # 2D sampler: extend to ivec3 with depth=1
+                return f"{lhs}ivec3(textureSize({img}, 0));"
+        else:
+            # 2D texture
+            if wants_ivec2:
+                return f"{lhs}ivec2(textureSize({img}, 0));"
+            else:
                 return f"{lhs}ivec3(textureSize({img}, 0), 1);"
-    
-    # Image binding
-    if is_3d:
-        return f"{lhs}ivec3(imageSize({img}));"
     else:
-        # 2D image: extend to ivec3 with depth=1
-        return f"{lhs}ivec3(imageSize({img}), 1);"
+        # Use imageSize for image bindings
+        if is_3d_texture:
+            # 3D texture returns ivec3
+            if wants_ivec2:
+                return f"{lhs}ivec2(imageSize({img}).xy);"
+            else:
+                return f"{lhs}ivec3(imageSize({img}));"
+        else:
+            # 2D texture
+            if wants_ivec2:
+                return f"{lhs}ivec2(imageSize({img}));"
+            else:
+                return f"{lhs}ivec3(imageSize({img}), 1);"
 
 
 def emit_sample(op, ctx):

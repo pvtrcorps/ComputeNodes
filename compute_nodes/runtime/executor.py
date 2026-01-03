@@ -14,6 +14,7 @@ import bpy
 import gpu
 from .textures import TextureManager, DynamicTexturePool
 from .shaders import ShaderManager
+from .state_manager import StateManager
 from ..planner.passes import ComputePass
 from ..planner.loops import PassLoop
 from ..ir.resources import ImageDesc
@@ -34,8 +35,18 @@ class ComputeExecutor:
         self.texture_mgr = texture_mgr
         self.shader_mgr = shader_mgr
         self.dynamic_pool = DynamicTexturePool()  # For dynamic resolution
+        self.state_manager = StateManager(texture_mgr)  # Loop state management
         self._resource_textures = {}
         self._dynamic_resources = {}  # Track which resources are dynamic
+        
+        # Loop context for shader uniforms (set by _run_pass_loop)
+        self._loop_context = {
+            'iteration': 0,
+            'read_width': 0,
+            'read_height': 0,
+            'write_width': 0,
+            'write_height': 0,
+        }
 
     def execute_graph(self, graph, passes, context_width=512, context_height=512):
         """Execute the entire graph by running passes in order."""
@@ -272,14 +283,17 @@ class ComputeExecutor:
         logger.debug(f"Pass {compute_pass.id}: dispatch({dispatch_w}x{dispatch_h}x{dispatch_d}) -> groups({group_x}x{group_y}x{group_z})")
         
         # Set dispatch size uniforms for Position normalization
-        # Set dispatch size uniforms for Position normalization
         try:
             shader.uniform_int("u_dispatch_width", dispatch_w)
             shader.uniform_int("u_dispatch_height", dispatch_h)
             shader.uniform_int("u_dispatch_depth", dispatch_d)
-            # Loop iteration index (0 for non-loop passes, set by _run_pass_loop for loops)
-            loop_iter = getattr(compute_pass, '_current_loop_iteration', 0)
-            shader.uniform_int("u_loop_iteration", loop_iter)
+            
+            # Loop context uniforms (set by _run_pass_loop each iteration)
+            shader.uniform_int("u_loop_iteration", self._loop_context['iteration'])
+            shader.uniform_int("u_loop_read_width", self._loop_context['read_width'])
+            shader.uniform_int("u_loop_read_height", self._loop_context['read_height'])
+            shader.uniform_int("u_loop_write_width", self._loop_context['write_width'])
+            shader.uniform_int("u_loop_write_height", self._loop_context['write_height'])
         except Exception as e:
             logger.debug(f"Could not set uniforms: {e}")
         
@@ -435,11 +449,40 @@ class ComputeExecutor:
                     texture_map[buf_info['ping_idx']] = buf_info['pong']
                     texture_map[buf_info['pong_idx']] = buf_info['ping']
             
+            # Update loop context for shader uniforms
+            # Get read/write buffer dimensions from first state variable (primary context)
+            if ping_pong_buffers:
+                first_state_idx = next(iter(ping_pong_buffers.keys()))
+                buf_info = ping_pong_buffers[first_state_idx]
+                
+                # Determine current read/write buffers based on iteration parity
+                if iter_idx % 2 == 0:
+                    read_buf = buf_info['ping']
+                    write_buf = buf_info['pong']
+                else:
+                    read_buf = buf_info['pong']
+                    write_buf = buf_info['ping']
+                
+                self._loop_context = {
+                    'iteration': iter_idx,
+                    'read_width': read_buf.width if read_buf else 0,
+                    'read_height': read_buf.height if read_buf else 0,
+                    'write_width': write_buf.width if write_buf else 0,
+                    'write_height': write_buf.height if write_buf else 0,
+                }
+                logger.debug(f"Loop iter {iter_idx}: read={self._loop_context['read_width']}x{self._loop_context['read_height']}, "
+                            f"write={self._loop_context['write_width']}x{self._loop_context['write_height']}")
+            else:
+                self._loop_context = {
+                    'iteration': iter_idx,
+                    'read_width': context_width,
+                    'read_height': context_height,
+                    'write_width': context_width,
+                    'write_height': context_height,
+                }
+            
             # Execute body passes
             for body_pass in loop.body_passes:
-                # Set current iteration for uniform (u_loop_iteration)
-                body_pass._current_loop_iteration = iter_idx
-                
                 # logger.info(f"DEBUG: Processing body item type: {type(body_pass)}")
                 if 'PassLoop' in str(type(body_pass)) or hasattr(body_pass, 'body_passes'):
                     # Nested loop - recursive

@@ -120,10 +120,24 @@ def handle_resize(node, ctx):
         val_ts_f = builder.cast(val_ts, DataType.VEC2)
         
         # 2. UV Calculation (Target Normalization)
+        # When size is dynamic (from loop iteration), use dispatch uniforms instead of constants
         val_gid_xy = builder.swizzle(val_gid, "xy")
         val_target_coord_i = builder.cast(val_gid_xy, DataType.IVEC2)
         val_target_coord_f = builder.cast(val_target_coord_i, DataType.VEC2)
-        val_target_size = builder.constant((float(width_val), float(height_val)), DataType.VEC2)
+        
+        if is_dynamic:
+            # DYNAMIC SIZE: Use u_dispatch_width/height uniforms (set by executor each pass)
+            # These reflect the ACTUAL output texture dimensions at runtime
+            val_dispatch_w = builder.builtin("u_dispatch_width", DataType.INT)
+            val_dispatch_h = builder.builtin("u_dispatch_height", DataType.INT)
+            val_dispatch_w_f = builder.cast(val_dispatch_w, DataType.FLOAT)
+            val_dispatch_h_f = builder.cast(val_dispatch_h, DataType.FLOAT)
+            val_target_size = builder.emit(OpCode.COMBINE_XY, [val_dispatch_w_f, val_dispatch_h_f], DataType.VEC2)
+            logger.debug(f"Resize '{node.name}': using dispatch uniforms for dynamic UV normalization")
+        else:
+            # STATIC SIZE: Use compile-time constants
+            val_target_size = builder.constant((float(width_val), float(height_val)), DataType.VEC2)
+        
         val_half = builder.constant((0.5, 0.5), DataType.VEC2)
         
         # uv = (target_coord + 0.5) / target_size
