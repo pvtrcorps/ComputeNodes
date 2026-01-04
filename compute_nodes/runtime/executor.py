@@ -71,6 +71,10 @@ class ComputeExecutor:
         # Phase 5: Register GPU-only viewer draw handlers
         if hasattr(graph, 'viewer_outputs') and graph.viewer_outputs:
             self._register_viewer_handlers(graph, texture_map)
+        
+        # Phase 6: Release all dynamic pool textures for reuse
+        self.dynamic_pool.release_all()
+        logger.debug("Released all dynamic pool textures")
 
     def _resolve_resources(self, graph, context_width, context_height) -> dict:
         """Map resource indices to GPU textures.

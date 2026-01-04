@@ -35,35 +35,25 @@ class ShaderManager:
         Returns:
             gpu.types.GPUShader: The compiled shader.
         """
-        # Create a robust cache key
-        res_sig = ""
-        reads_set = reads_idx or set()
-        writes_set = writes_idx or set()
+        # OPTIMIZED: Use hash(source) as primary cache key for O(1) lookup
+        # The built-in hash() is much faster than SHA256
+        cache_key = hash(source)
         
-        if resources:
-            for i, res in enumerate(resources):
-                fmt_sig = getattr(res, 'format', 'NONE')
-                # Include pass-specific access in cache key
-                pass_access = "R" if i in reads_set else ""
-                pass_access += "W" if i in writes_set else ""
-                res_sig += f"{i}:{res.name}:{pass_access}:{fmt_sig};"
+        if cache_key in self._shader_cache:
+            logger.debug(f"Shader cache HIT")
+            return self._shader_cache[cache_key]
         
-        # Include dispatch dimensionality in cache key (affects workgroup size)
-        dispatch_d = dispatch_size[2] if dispatch_size else 1
-        is_3d_dispatch = dispatch_d > 1
-        res_sig += f"dispatch3d:{is_3d_dispatch}"
-        
-        key = hashlib.sha256((source + res_sig).encode('utf-8')).hexdigest()
-        
-        if key in self._shader_cache:
-            logger.debug(f"Using cached shader: {key[:16]}...")
-            return self._shader_cache[key]
+        # Cache miss - need to compile
+        logger.debug(f"Shader cache MISS - compiling new shader")
         
         # Compile new shader
         try:
             shader_info = gpu.types.GPUShaderCreateInfo()
             
             # Define Interface from Resources
+            reads_set = reads_idx or set()
+            writes_set = writes_idx or set()
+            
             if resources:
                 from ..ir.resources import ImageDesc, ResourceType
                 
@@ -149,8 +139,8 @@ class ShaderManager:
             shader_info.compute_source(source)
             
             shader = gpu.shader.create_from_info(shader_info)
-            self._shader_cache[key] = shader
-            logger.debug(f"Compiled new shader: {key[:16]}...")
+            self._shader_cache[cache_key] = shader
+            logger.debug(f"Compiled and cached new shader")
             return shader
             
         except Exception as e:

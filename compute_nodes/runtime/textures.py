@@ -176,7 +176,9 @@ class DynamicTexturePool:
         # Value is a list of available textures at that size
         self._pool: dict[tuple, list[gpu.types.GPUTexture]] = {}
         # Currently in-use textures (can't be reused until released)
-        self._in_use: dict[int, tuple] = {}  # texture_id -> key
+        # FIX: Store (texture, key) pairs instead of id -> key
+        # This allows release_all() to actually recover the texture objects
+        self._in_use: list[tuple[gpu.types.GPUTexture, tuple]] = []
         self._logger = logging.getLogger(__name__)
     
     def get_or_create(self, size: tuple, format: str = 'RGBA32F', 
@@ -197,7 +199,7 @@ class DynamicTexturePool:
         # Check pool for available texture
         if key in self._pool and self._pool[key]:
             texture = self._pool[key].pop()
-            self._in_use[id(texture)] = key
+            self._in_use.append((texture, key))  # FIX: store texture ref
             self._logger.debug(f"DynamicPool: reusing texture {size}")
             return texture
         
@@ -213,7 +215,7 @@ class DynamicTexturePool:
             else:
                 texture = gpu.types.GPUTexture(size, format=format.upper())
             
-            self._in_use[id(texture)] = key
+            self._in_use.append((texture, key))  # FIX: store texture ref
             self._logger.debug(f"DynamicPool: created new texture {size}")
             return texture
             
@@ -223,21 +225,25 @@ class DynamicTexturePool:
     
     def release(self, texture: gpu.types.GPUTexture) -> None:
         """Return a texture to the pool for reuse."""
-        tex_id = id(texture)
-        if tex_id in self._in_use:
-            key = self._in_use.pop(tex_id)
-            if key not in self._pool:
-                self._pool[key] = []
-            self._pool[key].append(texture)
-            self._logger.debug(f"DynamicPool: released texture {key[0]}")
+        # FIX: Find by identity comparison instead of id()
+        for i, (tex, key) in enumerate(self._in_use):
+            if tex is texture:
+                self._in_use.pop(i)
+                if key not in self._pool:
+                    self._pool[key] = []
+                self._pool[key].append(texture)
+                self._logger.debug(f"DynamicPool: released texture {key[0]}")
+                return
     
     def release_all(self) -> None:
         """Release all in-use textures back to pool."""
-        for tex_id, key in list(self._in_use.items()):
+        # FIX: Now we have the actual texture objects
+        for texture, key in self._in_use:
             if key not in self._pool:
                 self._pool[key] = []
-            # Can't get texture from id, just clear the tracking
+            self._pool[key].append(texture)
         self._in_use.clear()
+        self._logger.debug(f"DynamicPool: released all {len(self._in_use)} textures")
     
     def clear(self) -> None:
         """Free all textures from pool."""
