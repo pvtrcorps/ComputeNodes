@@ -16,7 +16,7 @@ from bpy.props import (
     PointerProperty,
 )
 from ..nodetree import ComputeNode
-from ..sockets import ComputeSocketGrid, ComputeSocketEmpty
+from ..sockets import ComputeSocketGrid, ComputeSocketEmpty, set_socket_shape, apply_shape_for_socket
 from ..utils.sockets import with_sync_guard
 
 
@@ -186,13 +186,14 @@ class ComputeNodeRepeatInput(RepeatZoneMixin, ComputeNode):
     )
     
     def init(self, context):
-        # Fixed: Iterations input
+        # Fixed: Iterations input (single value - controls loop count)
         iter_socket = self.inputs.new('NodeSocketInt', "Iterations")
         iter_socket.default_value = 10
-        # Note: NodeSocketInt doesn't have min_value, use subtype or clamp in handler
+        set_socket_shape(iter_socket, 'single')
         
-        # Fixed: Iteration counter output
-        self.outputs.new('NodeSocketInt', "Iteration")
+        # Fixed: Iteration counter output (single value - current loop index)
+        iter_out = self.outputs.new('NodeSocketInt', "Iteration")
+        set_socket_shape(iter_out, 'single')
         
         # Extension socket (blank, for drag-to-add) - added last
         self._ensure_extension_socket()
@@ -339,10 +340,12 @@ class ComputeNodeRepeatInput(RepeatZoneMixin, ComputeNode):
             socket_type = item.socket_type
             
             # Input: Initial value (just use state name)
-            self.inputs.new(socket_type, item.name)
+            in_socket = self.inputs.new(socket_type, item.name)
+            apply_shape_for_socket(in_socket)
             
             # Output: Current value (just use state name for use inside loop)
-            self.outputs.new(socket_type, item.name)
+            out_socket = self.outputs.new(socket_type, item.name)
+            apply_shape_for_socket(out_socket)
         
         # Re-add extension socket
         self._ensure_extension_socket()
@@ -582,8 +585,10 @@ class ComputeNodeRepeatOutput(RepeatZoneMixin, ComputeNode):
         # Add sockets for each repeat item from paired input
         for item in paired.repeat_items:
             socket_type = item.socket_type
-            self.inputs.new(socket_type, item.name)
-            self.outputs.new(socket_type, item.name)
+            in_socket = self.inputs.new(socket_type, item.name)
+            apply_shape_for_socket(in_socket)
+            out_socket = self.outputs.new(socket_type, item.name)
+            apply_shape_for_socket(out_socket)
         
         # Re-add extension socket
         self._ensure_extension_socket()

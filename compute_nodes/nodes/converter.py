@@ -2,6 +2,7 @@
 import bpy
 from bpy.props import EnumProperty, FloatProperty, BoolProperty
 from ..nodetree import ComputeNode
+from ..sockets import set_socket_shape
 
 
 class ComputeNodeSeparateXYZ(ComputeNode):
@@ -12,11 +13,15 @@ class ComputeNodeSeparateXYZ(ComputeNode):
     node_category = "CONVERTER"
     
     def init(self, context):
-        self.inputs.new('NodeSocketVector', "Vector")
+        vec = self.inputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(vec, 'dynamic')
         
-        self.outputs.new('NodeSocketFloat', "X")
-        self.outputs.new('NodeSocketFloat', "Y")
-        self.outputs.new('NodeSocketFloat', "Z")
+        x = self.outputs.new('NodeSocketFloat', "X")
+        set_socket_shape(x, 'dynamic')
+        y = self.outputs.new('NodeSocketFloat', "Y")
+        set_socket_shape(y, 'dynamic')
+        z = self.outputs.new('NodeSocketFloat', "Z")
+        set_socket_shape(z, 'dynamic')
         
     def draw_buttons(self, context, layout):
         pass
@@ -34,11 +39,15 @@ class ComputeNodeCombineXYZ(ComputeNode):
     node_category = "CONVERTER"
     
     def init(self, context):
-        self.inputs.new('NodeSocketFloat', "X")
-        self.inputs.new('NodeSocketFloat', "Y")
-        self.inputs.new('NodeSocketFloat', "Z")
+        x = self.inputs.new('NodeSocketFloat', "X")
+        set_socket_shape(x, 'dynamic')
+        y = self.inputs.new('NodeSocketFloat', "Y")
+        set_socket_shape(y, 'dynamic')
+        z = self.inputs.new('NodeSocketFloat', "Z")
+        set_socket_shape(z, 'dynamic')
         
-        self.outputs.new('NodeSocketVector', "Vector")
+        vec = self.outputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(vec, 'dynamic')
         
     def draw_buttons(self, context, layout):
         pass
@@ -86,12 +95,18 @@ class ComputeNodeSeparateColor(ComputeNode):
     )
     
     def init(self, context):
-        self.inputs.new('NodeSocketColor', "Color").default_value = (0.8, 0.8, 0.8, 1.0)
+        col = self.inputs.new('NodeSocketColor', "Color")
+        col.default_value = (0.8, 0.8, 0.8, 1.0)
+        set_socket_shape(col, 'dynamic')
         
-        self.outputs.new('NodeSocketFloat', "Red")
-        self.outputs.new('NodeSocketFloat', "Green")
-        self.outputs.new('NodeSocketFloat', "Blue")
-        self.outputs.new('NodeSocketFloat', "Alpha")
+        r = self.outputs.new('NodeSocketFloat', "Red")
+        set_socket_shape(r, 'dynamic')
+        g = self.outputs.new('NodeSocketFloat', "Green")
+        set_socket_shape(g, 'dynamic')
+        b = self.outputs.new('NodeSocketFloat', "Blue")
+        set_socket_shape(b, 'dynamic')
+        a = self.outputs.new('NodeSocketFloat', "Alpha")
+        set_socket_shape(a, 'dynamic')
         
     def draw_buttons(self, context, layout):
         layout.prop(self, "mode", text="")
@@ -139,12 +154,18 @@ class ComputeNodeCombineColor(ComputeNode):
     )
     
     def init(self, context):
-        self.inputs.new('NodeSocketFloat', "Red")
-        self.inputs.new('NodeSocketFloat', "Green")
-        self.inputs.new('NodeSocketFloat', "Blue")
-        self.inputs.new('NodeSocketFloat', "Alpha").default_value = 1.0
+        r = self.inputs.new('NodeSocketFloat', "Red")
+        set_socket_shape(r, 'dynamic')
+        g = self.inputs.new('NodeSocketFloat', "Green")
+        set_socket_shape(g, 'dynamic')
+        b = self.inputs.new('NodeSocketFloat', "Blue")
+        set_socket_shape(b, 'dynamic')
+        a = self.inputs.new('NodeSocketFloat', "Alpha")
+        a.default_value = 1.0
+        set_socket_shape(a, 'dynamic')
         
-        self.outputs.new('NodeSocketColor', "Color")
+        col = self.outputs.new('NodeSocketColor', "Color")
+        set_socket_shape(col, 'dynamic')
         
     def draw_buttons(self, context, layout):
         layout.prop(self, "mode", text="")

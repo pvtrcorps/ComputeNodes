@@ -2,7 +2,7 @@
 import bpy
 from bpy.props import IntProperty, EnumProperty, BoolProperty
 from ..nodetree import ComputeNode
-from ..sockets import ComputeSocketGrid
+from ..sockets import ComputeSocketGrid, set_socket_shape
 
 
 def update_dimensions(self, context):
@@ -56,16 +56,18 @@ class ComputeNodeResize(ComputeNode):
     
     def init(self, context):
         self.apply_node_color()
-        self.inputs.new('ComputeSocketGrid', "Grid")
-        # Resolution inputs - allow dynamic values
-        self.inputs.new('NodeSocketInt', "Width")
-        self.inputs.new('NodeSocketInt', "Height")
-        self.inputs.new('NodeSocketInt', "Depth")
-        self.outputs.new('ComputeSocketGrid', "Grid")
-        
-    def draw_label(self):
-        self._draw_node_color()
-        return self.bl_label
+        # Grid I/O uses VOLUME_GRID shape
+        grid_in = self.inputs.new('ComputeSocketGrid', "Grid")
+        set_socket_shape(grid_in, 'grid')
+        # Resolution inputs - single values
+        w = self.inputs.new('NodeSocketInt', "Width")
+        set_socket_shape(w, 'single')
+        h = self.inputs.new('NodeSocketInt', "Height")
+        set_socket_shape(h, 'single')
+        d = self.inputs.new('NodeSocketInt', "Depth")
+        set_socket_shape(d, 'single')
+        grid_out = self.outputs.new('ComputeSocketGrid', "Grid")
+        set_socket_shape(grid_out, 'grid')
         
         # Set default values on sockets
         self.inputs['Width'].default_value = 512
@@ -74,6 +76,10 @@ class ComputeNodeResize(ComputeNode):
         
         # Hide Depth socket by default (2D mode)
         self.inputs['Depth'].hide = True
+        
+    def draw_label(self):
+        self._draw_node_color()
+        return self.bl_label
         
     def draw_buttons(self, context, layout):
         layout.prop(self, "dim_mode")

@@ -4,7 +4,7 @@
 import bpy
 from bpy.props import EnumProperty, FloatProperty, IntProperty, StringProperty, PointerProperty
 from ..nodetree import ComputeNode
-from ..sockets import ComputeSocketGrid
+from ..sockets import ComputeSocketGrid, set_socket_shape
 
 # Global storage for viewer textures
 # viewer_id -> (texture_manager, texture_name, node)
@@ -30,7 +30,8 @@ class ComputeNodeViewer(ComputeNode):
     
     def init(self, context):
         # Accept Grid
-        self.inputs.new('ComputeSocketGrid', "Grid")
+        grid_in = self.inputs.new('ComputeSocketGrid', "Grid")
+        set_socket_shape(grid_in, 'grid')
         
     def free(self):
         """Called when node is deleted - cleanup texture ref."""

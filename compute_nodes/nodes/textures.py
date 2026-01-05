@@ -2,6 +2,7 @@
 import bpy
 from bpy.props import EnumProperty, BoolProperty
 from ..nodetree import ComputeNode
+from ..sockets import set_socket_shape
 
 class ComputeNodeNoiseTexture(ComputeNode):
     bl_idname = 'ComputeNodeNoiseTexture'
@@ -34,16 +35,32 @@ class ComputeNodeNoiseTexture(ComputeNode):
     
     def init(self, context):
         self.apply_node_color()
-        self.inputs.new('NodeSocketVector', "Vector")
-        self.inputs.new('NodeSocketFloat', "W")
-        self.inputs.new('NodeSocketFloat', "Scale").default_value = 5.0
-        self.inputs.new('NodeSocketFloat', "Detail").default_value = 2.0
-        self.inputs.new('NodeSocketFloat', "Roughness").default_value = 0.5
-        self.inputs.new('NodeSocketFloat', "Lacunarity").default_value = 2.0
-        self.inputs.new('NodeSocketFloat', "Offset").default_value = 0.0
+        # Inputs accept both single values and fields (dynamic)
+        vec = self.inputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(vec, 'dynamic')
+        w = self.inputs.new('NodeSocketFloat', "W")
+        set_socket_shape(w, 'dynamic')
+        scale = self.inputs.new('NodeSocketFloat', "Scale")
+        scale.default_value = 5.0
+        set_socket_shape(scale, 'dynamic')
+        detail = self.inputs.new('NodeSocketFloat', "Detail")
+        detail.default_value = 2.0
+        set_socket_shape(detail, 'dynamic')
+        rough = self.inputs.new('NodeSocketFloat', "Roughness")
+        rough.default_value = 0.5
+        set_socket_shape(rough, 'dynamic')
+        lac = self.inputs.new('NodeSocketFloat', "Lacunarity")
+        lac.default_value = 2.0
+        set_socket_shape(lac, 'dynamic')
+        offset = self.inputs.new('NodeSocketFloat', "Offset")
+        offset.default_value = 0.0
+        set_socket_shape(offset, 'dynamic')
         
-        self.outputs.new('NodeSocketFloat', "Fac")
-        self.outputs.new('NodeSocketColor', "Color")
+        # Outputs are always Fields (per-pixel procedural)
+        fac = self.outputs.new('NodeSocketFloat', "Fac")
+        set_socket_shape(fac, 'field')
+        col = self.outputs.new('NodeSocketColor', "Color")
+        set_socket_shape(col, 'field')
         
         self.update_sockets(context)
         
@@ -79,11 +96,16 @@ class ComputeNodeWhiteNoise(ComputeNode):
     
     def init(self, context):
         self.apply_node_color()
-        self.inputs.new('NodeSocketVector', "Vector")
-        self.inputs.new('NodeSocketFloat', "W")
+        vec = self.inputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(vec, 'dynamic')
+        w = self.inputs.new('NodeSocketFloat', "W")
+        set_socket_shape(w, 'dynamic')
         
-        self.outputs.new('NodeSocketFloat', "Value")
-        self.outputs.new('NodeSocketColor', "Color")
+        # Outputs are Fields
+        val = self.outputs.new('NodeSocketFloat', "Value")
+        set_socket_shape(val, 'field')
+        col = self.outputs.new('NodeSocketColor', "Color")
+        set_socket_shape(col, 'field')
         
         self.update_sockets(context)
         
@@ -161,21 +183,44 @@ class ComputeNodeVoronoiTexture(ComputeNode):
     
     def init(self, context):
         self.apply_node_color()
-        self.inputs.new('NodeSocketVector', "Vector")
-        self.inputs.new('NodeSocketFloat', "W")
-        self.inputs.new('NodeSocketFloat', "Scale").default_value = 5.0
-        self.inputs.new('NodeSocketFloat', "Detail").default_value = 0.0
-        self.inputs.new('NodeSocketFloat', "Roughness").default_value = 0.5
-        self.inputs.new('NodeSocketFloat', "Lacunarity").default_value = 2.0
-        self.inputs.new('NodeSocketFloat', "Smoothness").default_value = 1.0
-        self.inputs.new('NodeSocketFloat', "Exponent").default_value = 1.0
-        self.inputs.new('NodeSocketFloat', "Randomness").default_value = 1.0
+        # Inputs are dynamic
+        vec = self.inputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(vec, 'dynamic')
+        w = self.inputs.new('NodeSocketFloat', "W")
+        set_socket_shape(w, 'dynamic')
+        scale = self.inputs.new('NodeSocketFloat', "Scale")
+        scale.default_value = 5.0
+        set_socket_shape(scale, 'dynamic')
+        detail = self.inputs.new('NodeSocketFloat', "Detail")
+        detail.default_value = 0.0
+        set_socket_shape(detail, 'dynamic')
+        rough = self.inputs.new('NodeSocketFloat', "Roughness")
+        rough.default_value = 0.5
+        set_socket_shape(rough, 'dynamic')
+        lac = self.inputs.new('NodeSocketFloat', "Lacunarity")
+        lac.default_value = 2.0
+        set_socket_shape(lac, 'dynamic')
+        smooth = self.inputs.new('NodeSocketFloat', "Smoothness")
+        smooth.default_value = 1.0
+        set_socket_shape(smooth, 'dynamic')
+        exp = self.inputs.new('NodeSocketFloat', "Exponent")
+        exp.default_value = 1.0
+        set_socket_shape(exp, 'dynamic')
+        rand = self.inputs.new('NodeSocketFloat', "Randomness")
+        rand.default_value = 1.0
+        set_socket_shape(rand, 'dynamic')
         
-        self.outputs.new('NodeSocketFloat', "Distance")
-        self.outputs.new('NodeSocketColor', "Color")
-        self.outputs.new('NodeSocketVector', "Position")
-        self.outputs.new('NodeSocketFloat', "W")
-        self.outputs.new('NodeSocketFloat', "Radius")
+        # Outputs are Fields (per-pixel procedural)
+        dist = self.outputs.new('NodeSocketFloat', "Distance")
+        set_socket_shape(dist, 'field')
+        col = self.outputs.new('NodeSocketColor', "Color")
+        set_socket_shape(col, 'field')
+        pos = self.outputs.new('NodeSocketVector', "Position")
+        set_socket_shape(pos, 'field')
+        w_out = self.outputs.new('NodeSocketFloat', "W")
+        set_socket_shape(w_out, 'field')
+        rad = self.outputs.new('NodeSocketFloat', "Radius")
+        set_socket_shape(rad, 'field')
         
         self.update_sockets(context)
         

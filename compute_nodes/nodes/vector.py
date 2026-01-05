@@ -1,6 +1,7 @@
 import bpy
 from bpy.props import EnumProperty
 from ..nodetree import ComputeNode
+from ..sockets import set_socket_shape
 
 class ComputeNodeVectorMath(ComputeNode):
     bl_idname = 'ComputeNodeVectorMath'
@@ -95,13 +96,20 @@ class ComputeNodeVectorMath(ComputeNode):
              self.outputs['Vector'].hide = op in float_out_ops
     
     def init(self, context):
-        self.inputs.new('NodeSocketVector', "Vector")
-        self.inputs.new('NodeSocketVector', "Vector") # Vector_001
-        self.inputs.new('NodeSocketVector', "Vector") # Vector_002
-        self.inputs.new('NodeSocketFloat', "Scale")   # Scale / IOR
+        # All inputs/outputs are dynamic (adapt to data structure)
+        v0 = self.inputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(v0, 'dynamic')
+        v1 = self.inputs.new('NodeSocketVector', "Vector") # Vector_001
+        set_socket_shape(v1, 'dynamic')
+        v2 = self.inputs.new('NodeSocketVector', "Vector") # Vector_002
+        set_socket_shape(v2, 'dynamic')
+        sc = self.inputs.new('NodeSocketFloat', "Scale")   # Scale / IOR
+        set_socket_shape(sc, 'dynamic')
         
-        self.outputs.new('NodeSocketVector', "Vector")
-        self.outputs.new('NodeSocketFloat', "Value")
+        out_v = self.outputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(out_v, 'dynamic')
+        out_f = self.outputs.new('NodeSocketFloat', "Value")
+        set_socket_shape(out_f, 'dynamic')
         
         self.update_sockets(context)
         
@@ -111,3 +119,69 @@ class ComputeNodeVectorMath(ComputeNode):
     def draw_label(self):
         self._draw_node_color()
         return self.operation.replace("_", " ").title()
+
+
+class ComputeNodeVectorRotate(ComputeNode):
+    bl_idname = 'ComputeNodeVectorRotate'
+    bl_label = 'Vector Rotate'
+    bl_icon = 'FORCE_MAGNETIC'
+    node_category = "VECTOR"
+    
+    rotation_type: EnumProperty(
+        name="Rotation Type",
+        items=[
+            ('AXIS_ANGLE', "Axis Angle", "Rotate around an arbitrary axis"),
+            ('X_AXIS', "X Axis", "Rotate around X axis"),
+            ('Y_AXIS', "Y Axis", "Rotate around Y axis"),
+            ('Z_AXIS', "Z Axis", "Rotate around Z axis"),
+            ('EULER_XYZ', "Euler", "Rotate using Euler angles"),
+        ],
+        default='AXIS_ANGLE',
+        update=lambda s,c: s.update_sockets(c)
+    )
+    
+    invert: bpy.props.BoolProperty(name="Invert", default=False)
+    
+    def update_sockets(self, context):
+        mode = self.rotation_type
+        
+        # Axis input
+        if 'Axis' in self.inputs:
+            self.inputs['Axis'].hide = (mode != 'AXIS_ANGLE')
+            
+        # Angle input
+        if 'Angle' in self.inputs:
+            self.inputs['Angle'].hide = (mode == 'EULER_XYZ')
+            
+        # Rotation (Euler) input
+        if 'Rotation' in self.inputs:
+            self.inputs['Rotation'].hide = (mode != 'EULER_XYZ')
+            
+    def init(self, context):
+        v = self.inputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(v, 'dynamic')
+        c = self.inputs.new('NodeSocketVector', "Center")
+        c.default_value = (0.0, 0.0, 0.0)
+        set_socket_shape(c, 'dynamic')
+        ax = self.inputs.new('NodeSocketVector', "Axis")
+        ax.default_value = (0.0, 0.0, 1.0)
+        set_socket_shape(ax, 'dynamic')
+        ang = self.inputs.new('NodeSocketFloat', "Angle")
+        ang.default_value = 0.0
+        set_socket_shape(ang, 'dynamic')
+        rot = self.inputs.new('NodeSocketVector', "Rotation")
+        rot.default_value = (0.0, 0.0, 0.0)
+        set_socket_shape(rot, 'dynamic')
+        
+        out = self.outputs.new('NodeSocketVector', "Vector")
+        set_socket_shape(out, 'dynamic')
+        
+        self.update_sockets(context)
+        
+    def draw_buttons(self, context, layout):
+        layout.prop(self, "rotation_type", text="")
+        layout.prop(self, "invert")
+        
+    def draw_label(self):
+        self._draw_node_color()
+        return "Vector Rotate"

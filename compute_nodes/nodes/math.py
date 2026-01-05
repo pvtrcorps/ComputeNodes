@@ -1,6 +1,7 @@
 import bpy
 from bpy.props import EnumProperty
 from ..nodetree import ComputeNode
+from ..sockets import set_socket_shape
 
 class ComputeNodeMath(ComputeNode):
     bl_idname = 'ComputeNodeMath'
@@ -95,11 +96,60 @@ class ComputeNodeMath(ComputeNode):
              pass
     
     def init(self, context):
-        self.inputs.new('NodeSocketFloat', "Value")
-        self.inputs.new('NodeSocketFloat', "Value") # Value_001
-        self.inputs.new('NodeSocketFloat', "Value") # Value_002 (For Ternary)
-        self.outputs.new('NodeSocketFloat', "Value")
+        # All inputs/outputs are dynamic (adapt to connected data structure)
+        in0 = self.inputs.new('NodeSocketFloat', "Value")
+        set_socket_shape(in0, 'dynamic')
+        in1 = self.inputs.new('NodeSocketFloat', "Value") # Value_001
+        set_socket_shape(in1, 'dynamic')
+        in2 = self.inputs.new('NodeSocketFloat', "Value") # Value_002 (For Ternary)
+        set_socket_shape(in2, 'dynamic')
+        out = self.outputs.new('NodeSocketFloat', "Value")
+        set_socket_shape(out, 'dynamic')
         
+        self.update_sockets(context)
+        
+    def draw_buttons(self, context, layout):
+        layout.prop(self, "operation")
+        
+    def draw_label(self):
+        self._draw_node_color()
+        return self.operation.replace("_", " ").title()
+
+class ComputeNodeBooleanMath(ComputeNode):
+    bl_idname = 'ComputeNodeBooleanMath'
+    bl_label = 'Boolean Math'
+    bl_icon = 'OUTLINER_OB_LATTICE'
+    node_category = "MATH"
+    
+    operation: EnumProperty(
+        name="Operation",
+        items=[
+            ('AND', "And", "A and B"),
+            ('OR', "Or", "A or B"),
+            ('NOT', "Not", "Not A"),
+            ('NAND', "Nand", "Not (A and B)"),
+            ('NOR', "Nor", "Not (A or B)"),
+            ('XNOR', "Xnor", "A == B"),
+            ('XOR', "Xor", "A != B"),
+            ('IMPLY', "Imply", "Not A or B"),
+            ('NIMPLY', "Nimply", "A and Not B"),
+        ],
+        default='AND',
+        update=lambda s,c: s.update_sockets(c)
+    )
+    
+    def update_sockets(self, context):
+        op = self.operation
+        if 'Boolean_001' in self.inputs:
+            self.inputs['Boolean_001'].hide = (op == 'NOT')
+            
+    def init(self, context):
+        in0 = self.inputs.new('NodeSocketBool', "Boolean")
+        set_socket_shape(in0, 'dynamic')
+        in1 = self.inputs.new('NodeSocketBool', "Boolean") # Boolean_001
+        set_socket_shape(in1, 'dynamic')
+        out = self.outputs.new('NodeSocketBool', "Boolean")
+        set_socket_shape(out, 'dynamic')
         self.update_sockets(context)
         
     def draw_buttons(self, context, layout):

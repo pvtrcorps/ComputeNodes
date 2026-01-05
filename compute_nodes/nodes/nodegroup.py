@@ -3,7 +3,7 @@
 import bpy
 from bpy.props import PointerProperty, StringProperty, CollectionProperty, BoolProperty, IntProperty
 from ..nodetree import ComputeNode
-from ..sockets import ComputeSocketGrid, map_socket_type
+from ..sockets import ComputeSocketGrid, map_socket_type, set_socket_shape, apply_shape_for_socket
 
 
 # ============================================================================
@@ -129,9 +129,11 @@ class ComputeNodeGroup(ComputeNode):
             if item.item_type == 'SOCKET':
                 socket_type = map_socket_type(item.socket_type)
                 if item.in_out == 'INPUT':
-                    self.inputs.new(socket_type, item.name)
+                    socket = self.inputs.new(socket_type, item.name)
+                    apply_shape_for_socket(socket)
                 elif item.in_out == 'OUTPUT':
-                    self.outputs.new(socket_type, item.name)
+                    socket = self.outputs.new(socket_type, item.name)
+                    apply_shape_for_socket(socket)
         
         # Restore links
         tree = self.id_data
@@ -205,7 +207,8 @@ class ComputeNodeGroupInput(ComputeNode):
             
             for item_name, item_socket_type in interface_inputs:
                 stype = map_socket_type(item_socket_type)
-                self.outputs.new(stype, item_name)
+                socket = self.outputs.new(stype, item_name)
+                apply_shape_for_socket(socket)
             
             self._ensure_empty_socket()
             
@@ -331,7 +334,8 @@ class ComputeNodeGroupOutput(ComputeNode):
             
             for item_name, item_socket_type in interface_outputs:
                 stype = map_socket_type(item_socket_type)
-                self.inputs.new(stype, item_name)
+                socket = self.inputs.new(stype, item_name)
+                apply_shape_for_socket(socket)
             
             self._ensure_empty_socket()
             

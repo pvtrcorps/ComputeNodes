@@ -2,6 +2,7 @@
 import bpy
 from bpy.props import IntProperty, EnumProperty
 from ..nodetree import ComputeNode
+from ..sockets import set_socket_shape
 
 
 def update_dimensions(self, context):
@@ -49,14 +50,19 @@ class ComputeNodeCapture(ComputeNode):
     
     def init(self, context):
         self.apply_node_color()
-        # Input: procedural field/color value
-        self.inputs.new('NodeSocketColor', "Field")
-        # Resolution inputs - allow dynamic values
-        self.inputs.new('NodeSocketInt', "Width")
-        self.inputs.new('NodeSocketInt', "Height")
-        self.inputs.new('NodeSocketInt', "Depth")
-        # Output: Grid handle (cyan socket)
-        self.outputs.new('ComputeSocketGrid', "Grid")
+        # Input: procedural field/color value (expects Field)
+        field_in = self.inputs.new('NodeSocketColor', "Field")
+        set_socket_shape(field_in, 'field')
+        # Resolution inputs - single values (not per-pixel)
+        w = self.inputs.new('NodeSocketInt', "Width")
+        set_socket_shape(w, 'single')
+        h = self.inputs.new('NodeSocketInt', "Height")
+        set_socket_shape(h, 'single')
+        d = self.inputs.new('NodeSocketInt', "Depth")
+        set_socket_shape(d, 'single')
+        # Output: Grid handle (VOLUME_GRID shape)
+        grid_out = self.outputs.new('ComputeSocketGrid', "Grid")
+        set_socket_shape(grid_out, 'grid')
         
         # Set default values on sockets
         self.inputs['Width'].default_value = 512

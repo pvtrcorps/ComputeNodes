@@ -19,6 +19,12 @@ node_categories = [
     ComputeNodeCategory("COMPUTE_INPUT", "Input", items=[
         NodeItem("ComputeNodeImageInput"),
         NodeItem("ComputeNodeImageInfo"),
+        NodeItem("ComputeNodeValue"),
+        # Input Vectors and scalars
+        NodeItem("ComputeNodeInputVector"),
+        NodeItem("ComputeNodeInputColor"),
+        NodeItem("ComputeNodeInputBool"),
+        NodeItem("ComputeNodeInputInt"),
         NodeItem("ComputeNodePosition"),
     ]),
     ComputeNodeCategory("COMPUTE_CONTROL", "Control", items=[
@@ -34,9 +40,11 @@ node_categories = [
     ]),
     ComputeNodeCategory("COMPUTE_VECTOR", "Vector", items=[
         NodeItem("ComputeNodeVectorMath"),
+        NodeItem("ComputeNodeVectorRotate"),
     ]),
     ComputeNodeCategory("COMPUTE_MATH", "Math", items=[
         NodeItem("ComputeNodeMath"),
+        NodeItem("ComputeNodeBooleanMath"),
     ]),
     ComputeNodeCategory("COMPUTE_CONVERTER", "Converter", items=[
         NodeItem("ComputeNodeSeparateXYZ"),

@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import StringProperty, EnumProperty, BoolProperty
 from ..nodetree import ComputeNode
-from ..sockets import ComputeSocketGrid
+from ..sockets import ComputeSocketGrid, set_socket_shape
 
 FORMAT_ITEMS = [
     ('RGBA8', "RGBA 8-bit", "Standard 8-bit per channel"),
@@ -76,7 +76,8 @@ class ComputeNodeOutputImage(ComputeNode):
     )
     
     def init(self, context):
-        self.inputs.new('ComputeSocketGrid', "Grid")
+        grid_in = self.inputs.new('ComputeSocketGrid', "Grid")
+        set_socket_shape(grid_in, 'grid')
         
     def draw_buttons(self, context, layout):
         layout.prop(self, "output_name", text="")

@@ -1,6 +1,84 @@
 import bpy
 from bpy.types import NodeSocket
 
+# -----------------------------------------------------------------------------
+# Blender 5.1+ Socket Shape Support
+# -----------------------------------------------------------------------------
+
+# Check if we're on Blender 5.1+ which has new socket shapes (LINE, VOLUME_GRID, LIST)
+# These were announced for 5.0 but only landed in 5.1 Alpha
+BLENDER_5_1 = bpy.app.version >= (5, 1, 0)
+
+# Shape mapping for our data model
+SOCKET_SHAPES = {
+    'single': 'LINE' if BLENDER_5_1 else 'CIRCLE',       # Single value (constants)
+    'field': 'DIAMOND',                                   # Field (lazy per-pixel)
+    'grid': 'VOLUME_GRID' if BLENDER_5_1 else 'SQUARE',  # Materialized grid
+    'list': 'LIST' if BLENDER_5_1 else 'SQUARE_DOT',     # Array/buffer data
+    'dynamic': 'CIRCLE',                                  # Flexible (adapts to input)
+}
+
+
+def set_socket_shape(socket, structure: str):
+    """
+    Set socket display shape based on data structure type.
+    
+    This aligns with Blender 5.0's new socket shape vocabulary:
+    - 'single': LINE shape - constant/single values (Value, Vector, Color inputs)
+    - 'field': DIAMOND shape - lazy per-pixel evaluation (Position, Noise, etc.)
+    - 'grid': VOLUME_GRID shape - materialized buffers (Capture output, Sample input)
+    - 'list': LIST shape - array/buffer data (future SSBO support)
+    - 'dynamic': CIRCLE shape - flexible, adapts to inputs (Math nodes)
+    
+    Args:
+        socket: The NodeSocket to configure
+        structure: One of 'single', 'field', 'grid', 'list', 'dynamic'
+    """
+    shape = SOCKET_SHAPES.get(structure, 'CIRCLE')
+    try:
+        socket.display_shape = shape
+    except (AttributeError, TypeError):
+        pass  # Older Blender or read-only socket
+
+
+def get_shape_for_socket_type(socket_type: str) -> str:
+    """
+    Determine the appropriate shape structure based on socket type (bl_idname).
+    
+    Used for dynamic socket creation in Repeat Zones and Node Groups.
+    
+    Args:
+        socket_type: The socket bl_idname (e.g., 'NodeSocketFloat', 'ComputeSocketGrid')
+    
+    Returns:
+        Structure string for set_socket_shape ('single', 'field', 'grid', 'list', 'dynamic')
+    """
+    if 'Grid' in socket_type:
+        return 'grid'
+    elif 'Buffer' in socket_type:
+        return 'list'
+    else:
+        # Standard Blender sockets in dynamic contexts are flexible
+        # They adapt to what's connected (Field or Single value)
+        return 'dynamic'
+
+
+def apply_shape_for_socket(socket):
+    """
+    Apply the appropriate display_shape to a socket based on its type.
+    
+    Convenience function that combines get_shape_for_socket_type and set_socket_shape.
+    
+    Args:
+        socket: The NodeSocket to configure
+    """
+    structure = get_shape_for_socket_type(socket.bl_idname)
+    set_socket_shape(socket, structure)
+
+
+# -----------------------------------------------------------------------------
+# Custom Socket Classes
+# -----------------------------------------------------------------------------
 
 class ComputeSocketGrid(NodeSocket):
     """
@@ -12,27 +90,39 @@ class ComputeSocketGrid(NodeSocket):
     - Grid1D: width only (arrays, LUTs)
     
     Use this for outputs of Capture, Resize, Image Input and inputs of Sample.
-    Visual: Cyan color to distinguish from procedural Color/Field values (yellow).
+    Visual: Cyan color + VOLUME_GRID shape to distinguish from Fields.
     """
     bl_idname = 'ComputeSocketGrid'
     bl_label = 'Grid'
     
+    def init_socket(self, node, socket_type):
+        """Called when socket is created - set display shape."""
+        set_socket_shape(self, 'grid')
+    
     def draw_color(self, context, node):
-        return (0.2, 0.8, 0.9, 1.0)  # Cyan
+        return (0.6, 0.6, 0.6, 1.0)  # Cyan
 
     def draw(self, context, layout, node, text):
+        # Ensure shape is set (in case init_socket wasn't called)
+        set_socket_shape(self, 'grid')
         layout.label(text=text)
 
 
 class ComputeSocketBuffer(NodeSocket):
-    """Custom socket for buffer data (future SSBO support)"""
+    """Custom socket for buffer data (future SSBO support). Uses LIST shape."""
     bl_idname = 'ComputeSocketBuffer'
     bl_label = 'Buffer'
+    
+    def init_socket(self, node, socket_type):
+        """Called when socket is created - set display shape."""
+        set_socket_shape(self, 'list')
     
     def draw_color(self, context, node):
         return (0.2, 0.8, 0.2, 1.0)  # Green
 
     def draw(self, context, layout, node, text):
+        # Ensure shape is set
+        set_socket_shape(self, 'list')
         layout.label(text=text)
 
 class ComputeSocketEmpty(NodeSocket):

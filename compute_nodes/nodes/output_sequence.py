@@ -3,7 +3,7 @@ import bpy
 import os
 from bpy.props import StringProperty, EnumProperty, IntProperty, BoolProperty
 from ..nodetree import ComputeNode
-from ..sockets import ComputeSocketGrid
+from ..sockets import ComputeSocketGrid, set_socket_shape
 
 
 FORMAT_ITEMS = [
@@ -82,7 +82,8 @@ class ComputeNodeOutputSequence(ComputeNode):
     
     def init(self, context):
         # Grid input - requires Grid3D from Capture3D
-        self.inputs.new('ComputeSocketGrid', "Grid")
+        grid_in = self.inputs.new('ComputeSocketGrid', "Grid")
+        set_socket_shape(grid_in, 'grid')
         
     def draw_buttons(self, context, layout):
         layout.prop(self, "base_name", text="Name")
