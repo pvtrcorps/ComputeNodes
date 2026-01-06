@@ -290,14 +290,15 @@ def emit_sample(op, ctx):
             uv = param(uv_input)
             uv_type = uv_input.type
         else:
-            # Use inline normalized UVs (for cross-pass or placeholder cases)
+            # Use inline normalized UVs based on the SOURCE texture size
+            # This handles cases where multiple read textures have different sizes
+            # Using textureSize(sampler) ensures correct UV mapping when source
+            # and destination textures have the same dimensions
             if is_3d:
-                # 3D: use all three dimensions from uniform
-                uv = "((vec3(gl_GlobalInvocationID.xyz) + vec3(0.5)) / vec3(u_dispatch_size))"
+                uv = f"((vec3(gl_GlobalInvocationID.xyz) + vec3(0.5)) / vec3(textureSize({sampler}, 0)))"
                 uv_type = DataType.VEC3
             else:
-                # 2D: use xy from uniform
-                uv = "((vec2(gl_GlobalInvocationID.xy) + vec2(0.5)) / vec2(u_dispatch_size.xy))"
+                uv = f"((vec2(gl_GlobalInvocationID.xy) + vec2(0.5)) / vec2(textureSize({sampler}, 0)))"
                 uv_type = DataType.VEC2
         
         # Type check: ensure coordinate matches texture dimensionality

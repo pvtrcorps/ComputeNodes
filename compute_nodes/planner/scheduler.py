@@ -157,6 +157,11 @@ def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
         # PHASE 4.5: Re-apply field dependency propagation to loop body passes
         # wrap_passes_in_loops recreates passes from raw ops, losing Phase 2 deps
         _propagate_field_deps_recursive(passes, graph)
+    
+    # ===== PHASE 5: Split passes by output size =====
+    # When a pass writes to resources with different sizes, split into separate passes
+    # This ensures correct UV/dispatch calculations for each output
+    passes = _split_passes_by_output_size(passes, graph)
         
     return passes
 
@@ -226,3 +231,105 @@ def _calculate_dispatch_size(compute_pass: ComputePass, graph: Graph):
         # Leave as default (0, 0, 0) to signal "use context"
         compute_pass.dispatch_size = (0, 0, 0)
 
+
+def _get_write_size(op: Op, graph: Graph) -> tuple:
+    """Get the size of the resource this op writes to."""
+    writes = op.writes_resources()
+    if not writes:
+        return (0, 0)
+    
+    # Get the first write's size
+    for res_idx in writes:
+        if res_idx < len(graph.resources):
+            res = graph.resources[res_idx]
+            if hasattr(res, 'size') and res.size != (0, 0):
+                return res.size
+    return (0, 0)
+
+
+def _split_passes_by_output_size(passes: list, graph: Graph) -> list:
+    """
+    Split passes that write to resources with different sizes.
+    
+    When a pass contains IMAGE_STORE ops that write to resources of different
+    sizes, we split them into separate passes. This ensures each pass has a
+    single dispatch size, fixing UV calculation issues.
+    
+    This function processes both regular ComputePasses and PassLoops recursively.
+    """
+    result = []
+    
+    for item in passes:
+        if hasattr(item, 'body_passes'):  # PassLoop
+            # Recursively process loop body passes
+            item.body_passes = _split_passes_by_output_size(item.body_passes, graph)
+            result.append(item)
+        else:  # ComputePass
+            split_passes = _split_single_pass_by_size(item, graph)
+            result.extend(split_passes)
+    
+    return result
+
+
+def _split_single_pass_by_size(compute_pass: ComputePass, graph: Graph) -> list:
+    """
+    Split a single pass if it writes to resources with different sizes.
+    
+    Returns a list of passes (may be just the original if no split needed).
+    """
+    # Group ops by the size of their write target
+    size_to_ops: Dict[tuple, list] = {}
+    non_writing_ops = []
+    
+    for op in compute_pass.ops:
+        writes = op.writes_resources()
+        if writes:
+            size = _get_write_size(op, graph)
+            if size not in size_to_ops:
+                size_to_ops[size] = []
+            size_to_ops[size].append(op)
+        else:
+            # Non-writing ops (field computations) need to be duplicated
+            non_writing_ops.append(op)
+    
+    # If all writes are same size (or no splits needed), return original
+    if len(size_to_ops) <= 1:
+        return [compute_pass]
+    
+    # Split into multiple passes
+    result = []
+    base_id = compute_pass.id
+    
+    for idx, (size, ops) in enumerate(sorted(size_to_ops.items(), key=lambda x: x[0])):
+        new_pass = ComputePass(pass_id=f"{base_id}_{idx}")
+        
+        # Add non-writing ops first (field dependencies)
+        for op in non_writing_ops:
+            new_pass.add_op(op)
+        
+        # Add the writing ops for this size
+        for op in ops:
+            new_pass.add_op(op)
+        
+        # Recalculate reads/writes
+        new_pass.reads = set()
+        new_pass.writes = set()
+        new_pass.reads_idx = set()
+        new_pass.writes_idx = set()
+        
+        for op in new_pass.ops:
+            for res_idx in op.reads_resources():
+                res = graph.resources[res_idx]
+                new_pass.reads.add(res)
+                new_pass.reads_idx.add(res_idx)
+            for res_idx in op.writes_resources():
+                res = graph.resources[res_idx]
+                new_pass.writes.add(res)
+                new_pass.writes_idx.add(res_idx)
+        
+        # Calculate dispatch size for this pass
+        _calculate_dispatch_size(new_pass, graph)
+        
+        result.append(new_pass)
+    
+    return result

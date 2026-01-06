@@ -389,6 +389,8 @@ class ComputeExecutor:
             self.gpu_ops.memory_barrier()
         
         # After loop: Final output - point ping/pong to the correct source textures
+        # Also build mapping of pong_idx -> final_size for output resizing
+        pong_to_size = {}
         for buf_info in ping_pong_buffers.values():
             state = buf_info['state']
             
@@ -405,7 +407,36 @@ class ComputeExecutor:
             # This allows subsequent passes to read from the correct sized texture
             texture_map[buf_info['ping_idx']] = final_buf
             texture_map[buf_info['pong_idx']] = final_buf
+            pong_to_size[buf_info['pong_idx']] = (final_buf.width, final_buf.height)
             logger.debug(f"Loop end: state {state.name} final size {final_buf.width}x{final_buf.height}")
+        
+        # Resize outputs that read from loop states to match their source sizes
+        # Find outputs (non-internal resources) and resize them to match their source pong
+        for idx, res_desc in enumerate(graph.resources):
+            if hasattr(res_desc, 'is_internal') and not res_desc.is_internal:
+                # Find which pong this output corresponds to - check if it's connected to a loop state
+                # For now, iterate pong indices and find matching output by position
+                # This works because the final pass reads/writes are ordered consistently
+                pass
+        
+        # For each pong_idx, find the corresponding output in texture_map and resize
+        # The mapping is: sorted(pong_indices) -> sorted(output_indices)
+        pong_indices = sorted(pong_to_size.keys())
+        output_indices = sorted([idx for idx, res in enumerate(graph.resources) 
+                                  if hasattr(res, 'is_internal') and not res.is_internal])
+        
+        for pong_idx, output_idx in zip(pong_indices, output_indices):
+            pong_size = pong_to_size[pong_idx]
+            if output_idx in texture_map:
+                current = texture_map[output_idx]
+                if (current.width, current.height) != pong_size:
+                    # Resize output to match source size
+                    res_desc = graph.resources[output_idx]
+                    new_tex = self.resolver.dynamic_pool.get_or_create(
+                        pong_size, 'RGBA32F', getattr(res_desc, 'dimensions', 2)
+                    )
+                    texture_map[output_idx] = new_tex
+                    logger.info(f"Resized output[{output_idx}] to {pong_size} to match loop state")
         
         logger.info(f"Loop completed: {iterations} iterations")
 
