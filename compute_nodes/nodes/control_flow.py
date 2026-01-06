@@ -5,7 +5,6 @@ from ..nodetree import ComputeNode
 class ComputeNodeSwitch(ComputeNode):
     bl_idname = 'ComputeNodeSwitch'
     bl_label = 'Switch'
-    bl_icon = 'QUESTION'
     node_category = "CONTROL"
     
     data_type: EnumProperty(
@@ -51,7 +50,6 @@ class ComputeNodeSwitch(ComputeNode):
 class ComputeNodeMix(ComputeNode):
     bl_idname = 'ComputeNodeMix'
     bl_label = 'Mix'
-    bl_icon = 'GROUP_VCOL'
     node_category = "CONTROL"
     
     data_type: EnumProperty(

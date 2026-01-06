@@ -67,7 +67,6 @@ class ComputeNodeGroup(ComputeNode):
     """
     bl_idname = 'ComputeNodeGroup'
     bl_label = 'Group'
-    bl_icon = 'NODETREE'
     node_category = "GROUPS"
     
     def poll_compute_trees(self, node_tree):
@@ -162,7 +161,6 @@ class ComputeNodeGroupInput(ComputeNode):
     """
     bl_idname = 'ComputeNodeGroupInput'
     bl_label = 'Group Input'
-    bl_icon = 'IMPORT'
     node_category = "GROUPS"
     
     def init(self, context):
@@ -289,7 +287,6 @@ class ComputeNodeGroupOutput(ComputeNode):
     """
     bl_idname = 'ComputeNodeGroupOutput'
     bl_label = 'Group Output'
-    bl_icon = 'EXPORT'
     node_category = "GROUPS"
     
     is_active_output: BoolProperty(default=True)

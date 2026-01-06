@@ -6,7 +6,6 @@ from ..sockets import set_socket_shape
 class ComputeNodeVectorMath(ComputeNode):
     bl_idname = 'ComputeNodeVectorMath'
     bl_label = 'Vector Math'
-    bl_icon = 'ADD'
     node_category = "VECTOR"
     
     operation: EnumProperty(
@@ -124,7 +123,6 @@ class ComputeNodeVectorMath(ComputeNode):
 class ComputeNodeVectorRotate(ComputeNode):
     bl_idname = 'ComputeNodeVectorRotate'
     bl_label = 'Vector Rotate'
-    bl_icon = 'FORCE_MAGNETIC'
     node_category = "VECTOR"
     
     rotation_type: EnumProperty(

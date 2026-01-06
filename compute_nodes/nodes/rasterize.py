@@ -33,7 +33,6 @@ class ComputeNodeCapture(ComputeNode):
     """
     bl_idname = 'ComputeNodeCapture'
     bl_label = 'Capture'
-    bl_icon = 'RENDERLAYERS'
     node_category = "GRID"
     
     # Grid dimensions mode

@@ -191,12 +191,16 @@ class ComputeNode(Node):
         return nodetree.bl_idname == 'ComputeNodeTree'
     
     def get_node_color(self):
-        """Get the color for this node."""
-        # Unified color for all nodes (Darker Gray as requested)
+        """Get the base gray color for the node body."""
         return (0.18, 0.18, 0.18)
+    
+    def get_category_color(self):
+        """Get the category accent color for this node."""
+        from .categories import get_category_color
+        return get_category_color(self.node_category)
         
     def apply_node_color(self):
-        """Apply the category color to the node using Blender's native coloring."""
+        """Apply the base gray color to the node."""
         color = self.get_node_color()
         self.use_custom_color = True
         self.color = color
@@ -220,12 +224,21 @@ class ComputeNode(Node):
         self.apply_node_color()
         
     def _draw_node_color(self):
-        """Draw the node background color overlay. Identical to GeneralRig implementation."""
+        """Draw a thin colored band at the top of the node for category identification."""
         if self.hide:
             return
             
         ui_scale = bpy.context.preferences.system.ui_scale
-        x, y = self.location.x * ui_scale, self.location.y * ui_scale
+        
+        # Calculate absolute position by adding parent frame offsets
+        abs_x, abs_y = self.location.x, self.location.y
+        parent = self.parent
+        while parent:
+            abs_x += parent.location.x
+            abs_y += parent.location.y
+            parent = parent.parent
+        
+        x, y = abs_x * ui_scale, abs_y * ui_scale
         try:
             width, height = self.dimensions.x, self.dimensions.y
         except AttributeError:
@@ -234,20 +247,34 @@ class ComputeNode(Node):
         # Avoid drawing collapsed/invalid nodes
         if width <= 0 or height <= 0:
             return
-            
-        # Expand by 1 pixel (size=1) to fully cover original header borders
-        coords = _rounded_rect(
+        
+        # Draw the main gray body
+        body_coords = _rounded_rect(
             x, y,
             width, height,
             radius=6,
             segments=6,
             size=1
         )
+        gray_color = (self.color[0], self.color[1], self.color[2], 1.0)
+        _draw_polygon_color(body_coords, color=gray_color)
         
-        # Use node color with full opacity
-        # Using 1.0 alpha as per GeneralRig example pattern
-        color = (self.color[0], self.color[1], self.color[2], 1.0)
-        _draw_polygon_color(coords, color=color)
+        # Draw the colored top band (3 pixels tall)
+        band_height = 4
+        category_color = self.get_category_color()
+        
+        # Create a thin rectangle at the top
+        # We need to create a simple quad for the band
+        band_coords = [
+            (x, y),                          # Top-left
+            (x + width, y),                  # Top-right
+            (x + width, y - band_height),    # Bottom-right
+            (x, y - band_height),            # Bottom-left
+            (x, y)                           # Close the loop
+        ]
+        
+        band_color = (category_color[0], category_color[1], category_color[2], 1.0)
+        _draw_polygon_color(band_coords, color=band_color)
     
     def draw_label(self):
         """Draw the node label and color overlay."""

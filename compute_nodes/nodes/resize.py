@@ -28,7 +28,6 @@ class ComputeNodeResize(ComputeNode):
     """
     bl_idname = 'ComputeNodeResize'
     bl_label = 'Resize'
-    bl_icon = 'FULLSCREEN_ENTER'
     node_category = "GRID"
     
     # Dimensions mode (consistent with Capture)

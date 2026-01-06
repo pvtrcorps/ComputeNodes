@@ -7,7 +7,6 @@ from ..sockets import set_socket_shape
 class ComputeNodeNoiseTexture(ComputeNode):
     bl_idname = 'ComputeNodeNoiseTexture'
     bl_label = 'Noise Texture'
-    bl_icon = 'TEXTURE'
     node_category = "TEXTURE"
     
     def update_sockets(self, context):
@@ -75,7 +74,6 @@ class ComputeNodeNoiseTexture(ComputeNode):
 class ComputeNodeWhiteNoise(ComputeNode):
     bl_idname = 'ComputeNodeWhiteNoise'
     bl_label = 'White Noise'
-    bl_icon = 'TEXTURE'
     node_category = "TEXTURE"
     
     def update_sockets(self, context):
@@ -120,7 +118,6 @@ class ComputeNodeWhiteNoise(ComputeNode):
 class ComputeNodeVoronoiTexture(ComputeNode):
     bl_idname = 'ComputeNodeVoronoiTexture'
     bl_label = 'Voronoi Texture'
-    bl_icon = 'TEXTURE'
     node_category = "TEXTURE"
     
     def update_sockets(self, context):

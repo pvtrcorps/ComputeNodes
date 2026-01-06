@@ -169,7 +169,6 @@ class ComputeNodeRepeatInput(RepeatZoneMixin, ComputeNode):
     
     bl_idname = 'ComputeNodeRepeatInput'
     bl_label = 'Repeat Zone (Input)'
-    bl_icon = 'LOOP_FORWARDS'
     node_category = "CONTROL"
     
     # Collection of state items
@@ -434,7 +433,6 @@ class ComputeNodeRepeatOutput(RepeatZoneMixin, ComputeNode):
     
     bl_idname = 'ComputeNodeRepeatOutput'
     bl_label = 'Repeat Zone (Output)'
-    bl_icon = 'LOOP_BACK'
     node_category = "CONTROL"
     
     # Mirror of input's collection (synced automatically)

@@ -37,7 +37,6 @@ class ComputeNodeOutputImage(ComputeNode):
     """
     bl_idname = 'ComputeNodeOutputImage'
     bl_label = 'Output Image'
-    bl_icon = 'OUTPUT'
     node_category = "OUTPUT"
     
     output_name: StringProperty(

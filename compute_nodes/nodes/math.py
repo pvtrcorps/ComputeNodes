@@ -6,7 +6,6 @@ from ..sockets import set_socket_shape
 class ComputeNodeMath(ComputeNode):
     bl_idname = 'ComputeNodeMath'
     bl_label = 'Math'
-    bl_icon = 'ADD'
     node_category = "MATH"
     
     operation: EnumProperty(
@@ -118,7 +117,6 @@ class ComputeNodeMath(ComputeNode):
 class ComputeNodeBooleanMath(ComputeNode):
     bl_idname = 'ComputeNodeBooleanMath'
     bl_label = 'Boolean Math'
-    bl_icon = 'OUTLINER_OB_LATTICE'
     node_category = "MATH"
     
     operation: EnumProperty(

@@ -8,7 +8,6 @@ class ComputeNodeImageInput(ComputeNode):
     """Load a Blender image as a Grid (sampleable data)."""
     bl_idname = 'ComputeNodeImageInput'
     bl_label = 'Image Input'
-    bl_icon = 'IMAGE_DATA'
     node_category = "INPUT"
     
     image: PointerProperty(type=bpy.types.Image, name="Image")
@@ -31,7 +30,6 @@ class ComputeNodeImageWrite(ComputeNode):
     """Write to a Blender image datablock (storage target)."""
     bl_idname = 'ComputeNodeImageWrite'
     bl_label = 'Image Write (Storage)'
-    bl_icon = 'IMAGE_DATA'
     node_category = "OUTPUT"
     
     image: PointerProperty(type=bpy.types.Image, name="Image")
@@ -80,7 +78,6 @@ class ComputeNodeValue(ComputeNode):
     """Output a constant float value."""
     bl_idname = 'ComputeNodeValue'
     bl_label = 'Value'
-    bl_icon = 'DRIVER'
     node_category = "INPUT"
     
     def init(self, context):
@@ -104,7 +101,6 @@ class ComputeNodeInputVector(ComputeNode):
     """Output a constant vector value."""
     bl_idname = 'ComputeNodeInputVector'
     bl_label = 'Vector'
-    bl_icon = 'AXIS_SIDE'
     node_category = "INPUT"
     
     def init(self, context):
@@ -131,7 +127,6 @@ class ComputeNodeInputColor(ComputeNode):
     """Output a constant color value."""
     bl_idname = 'ComputeNodeInputColor'
     bl_label = 'Color'
-    bl_icon = 'COLOR'
     node_category = "INPUT"
     
     def init(self, context):
@@ -154,7 +149,6 @@ class ComputeNodeInputBool(ComputeNode):
     """Output a constant boolean value."""
     bl_idname = 'ComputeNodeInputBool'
     bl_label = 'Boolean'
-    bl_icon = 'CHECKBOX_HLT'
     node_category = "INPUT"
     
     def init(self, context):
@@ -176,7 +170,6 @@ class ComputeNodeInputInt(ComputeNode):
     """Output a constant integer value."""
     bl_idname = 'ComputeNodeInputInt'
     bl_label = 'Integer'
-    bl_icon = 'LINENUMBERS_ON'
     node_category = "INPUT"
     
     def init(self, context):

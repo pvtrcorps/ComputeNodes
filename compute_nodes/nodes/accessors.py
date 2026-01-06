@@ -8,7 +8,6 @@ class ComputeNodePosition(ComputeNode):
     """Get current pixel/thread position."""
     bl_idname = 'ComputeNodePosition'
     bl_label = 'Position'
-    bl_icon = 'AXIS_TOP'
     node_category = "INPUT"
     
     def init(self, context):
@@ -30,7 +29,6 @@ class ComputeNodeSample(ComputeNode):
     """Sample a Grid at given coordinates."""
     bl_idname = 'ComputeNodeSample'
     bl_label = 'Sample'
-    bl_icon = 'EYEDROPPER'
     node_category = "TEXTURE"
     
     def init(self, context):

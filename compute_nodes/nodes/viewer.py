@@ -22,7 +22,6 @@ class ComputeNodeViewer(ComputeNode):
     """
     bl_idname = 'ComputeNodeViewer'
     bl_label = 'Viewer'
-    bl_icon = 'HIDE_OFF'
     node_category = "OUTPUT"
     
     # Internal: texture name

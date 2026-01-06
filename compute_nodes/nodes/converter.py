@@ -9,7 +9,6 @@ class ComputeNodeSeparateXYZ(ComputeNode):
     """Separates a vector into X, Y, Z components."""
     bl_idname = 'ComputeNodeSeparateXYZ'
     bl_label = 'Separate XYZ'
-    bl_icon = 'ORIENTATION_GLOBAL'
     node_category = "CONVERTER"
     
     def init(self, context):
@@ -35,7 +34,6 @@ class ComputeNodeCombineXYZ(ComputeNode):
     """Combines X, Y, Z values into a vector."""
     bl_idname = 'ComputeNodeCombineXYZ'
     bl_label = 'Combine XYZ'
-    bl_icon = 'ORIENTATION_GLOBAL'
     node_category = "CONVERTER"
     
     def init(self, context):
@@ -61,7 +59,6 @@ class ComputeNodeSeparateColor(ComputeNode):
     """Separates a color into its components based on mode."""
     bl_idname = 'ComputeNodeSeparateColor'
     bl_label = 'Separate Color'
-    bl_icon = 'COLOR'
     node_category = "CONVERTER"
     
     def update_sockets(self, context):
@@ -120,7 +117,6 @@ class ComputeNodeCombineColor(ComputeNode):
     """Combines components into a color based on mode."""
     bl_idname = 'ComputeNodeCombineColor'
     bl_label = 'Combine Color'
-    bl_icon = 'COLOR'
     node_category = "CONVERTER"
     
     def update_sockets(self, context):
@@ -179,7 +175,6 @@ class ComputeNodeMapRange(ComputeNode):
     """Maps a value from one range to another with various interpolation modes."""
     bl_idname = 'ComputeNodeMapRange'
     bl_label = 'Map Range'
-    bl_icon = 'DRIVER_DISTANCE'
     node_category = "CONVERTER"
     
     def update_sockets(self, context):
@@ -273,7 +268,6 @@ class ComputeNodeClamp(ComputeNode):
     """Clamps a value between minimum and maximum."""
     bl_idname = 'ComputeNodeClamp'
     bl_label = 'Clamp'
-    bl_icon = 'CON_DISTLIMIT'
     node_category = "CONVERTER"
     
     clamp_type: EnumProperty(
