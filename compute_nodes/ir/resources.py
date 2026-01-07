@@ -52,6 +52,7 @@ class ImageDesc(ResourceDesc):
     is_internal: bool = True  # GPU-only by default
     dynamic_size: bool = False  # True if size computed at runtime
     size_expression: dict = field(default_factory=dict, compare=False, hash=False)  # Runtime size computation
+    loop_body_resource: bool = False  # True if this resource is written INSIDE a loop body
     
     def __post_init__(self):
         # Set appropriate resource type based on dimensions

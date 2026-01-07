@@ -37,6 +37,12 @@ def extract_graph(nodetree) -> Graph:
     # Recursion stack for cycle detection
     recursion_stack: Set[int] = set()
     
+    # Shared extraction state (propagated through all NodeContext instances)
+    # loop_depth: 0 = outside any loop, 1+ = inside loop(s)
+    extraction_state: Dict[str, any] = {
+        'loop_depth': 0,
+    }
+    
     # Find Output Nodes (Output Image, Output Sequence, Viewer)
     output_nodes = []
     output_bl_idnames = {'ComputeNodeOutputImage', 'ComputeNodeOutputSequence', 'ComputeNodeViewer'}
@@ -168,14 +174,18 @@ def extract_graph(nodetree) -> Graph:
                 logger.warning(f"No handler for {node.bl_idname}")
                 return None
             
-            # Create typed context
+            # Create typed context - include extraction_state reference for loop_depth tracking
+            # Pass as 'extraction_state' key so the dict can be modified by handlers
             ctx = NodeContext(
                 builder=builder,
                 node=node,
                 socket_value_map=socket_value_map,
                 get_socket_key=get_socket_key,
                 get_socket_value=get_socket_value,
-                extra_ctx={'output_socket_needed': out_socket}
+                extra_ctx={
+                    'output_socket_needed': out_socket,
+                    'extraction_state': extraction_state
+                }
             )
             
             # Execute handler

@@ -96,7 +96,7 @@ class LoopExecutor:
             self._execute_iteration(
                 graph, loop, iter_idx, iterations,
                 texture_map, ping_pong, dynamic_resources,
-                context_width, context_height
+                state, context_width, context_height
             )
         
         # 4. Finalize - assign final buffers, resize outputs, update state
@@ -177,7 +177,7 @@ class LoopExecutor:
     
     def _execute_iteration(self, graph, loop: PassLoop, iter_idx: int, total_iterations: int,
                            texture_map: dict, ping_pong: dict, dynamic_resources: dict,
-                           context_width: int, context_height: int) -> None:
+                           state: ExecutionState, context_width: int, context_height: int) -> None:
         """Execute a single loop iteration."""
         
         # 1. Swap ping-pong buffers
@@ -197,8 +197,8 @@ class LoopExecutor:
         # 4. Execute body passes
         for body_pass in loop.body_passes:
             if hasattr(body_pass, 'body_passes'):
-                # Nested loop - recursive call
-                self.execute(graph, body_pass, texture_map, context_width, context_height)
+                # Nested loop - recursive call with state
+                self.execute(graph, body_pass, texture_map, state, context_width, context_height)
             else:
                 self.pass_runner.run(graph, body_pass, texture_map, context_width, context_height)
         

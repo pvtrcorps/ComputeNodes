@@ -85,6 +85,27 @@ class NodeContext:
     def graph(self):
         return self.builder.graph
 
+    @property
+    def loop_depth(self) -> int:
+        """Get current loop nesting depth (0 = not in loop, 1+ = inside loop)."""
+        extraction_state = self.extra.get('extraction_state', {})
+        return extraction_state.get('loop_depth', 0)
+    
+    @property
+    def in_loop_body(self) -> bool:
+        """Check if currently processing nodes inside a loop body."""
+        return self.loop_depth > 0
+    
+    def enter_loop(self):
+        """Increment loop depth when entering a repeat zone body."""
+        extraction_state = self.extra.get('extraction_state', {})
+        extraction_state['loop_depth'] = extraction_state.get('loop_depth', 0) + 1
+    
+    def exit_loop(self):
+        """Decrement loop depth when exiting a repeat zone body."""
+        extraction_state = self.extra.get('extraction_state', {})
+        extraction_state['loop_depth'] = max(0, extraction_state.get('loop_depth', 1) - 1)
+
     def error(self, message: str):
         """Raise a descriptive error associated with this node."""
         raise RuntimeError(f"Node Error [{self.node.name}]: {message}")

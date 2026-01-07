@@ -159,24 +159,30 @@ def handle_repeat_output(node, ctx):
         state.current_value = val_current
     
     # Process body - Inputs to RepeatOutput
-    for state in state_vars:
-        val_next = None
-        if state.socket_name in node.inputs:
-            # We can use ctx.get_input() here because we are at the RepeatOutput node
-            val_next = ctx.get_input(state.socket_name)
-        
-        if val_next is None:
-            val_next = state.current_value
-        
-        if val_next is None:
-            val_next = builder.constant(0.0, state.data_type)
-        
-        if state.is_grid and state.pong_idx is not None:
-            if val_next.resource_index is not None and val_next.resource_index != state.pong_idx:
-                logger.debug(f"Adding copy: resource {val_next.resource_index} -> pong {state.pong_idx}")
-                state.copy_from_resource = val_next.resource_index
-        
-        state.next_value = val_next
+    # Enter loop context BEFORE processing body nodes so they know they're inside a loop
+    ctx.enter_loop()
+    try:
+        for state in state_vars:
+            val_next = None
+            if state.socket_name in node.inputs:
+                # We can use ctx.get_input() here because we are at the RepeatOutput node
+                val_next = ctx.get_input(state.socket_name)
+            
+            if val_next is None:
+                val_next = state.current_value
+            
+            if val_next is None:
+                val_next = builder.constant(0.0, state.data_type)
+            
+            if state.is_grid and state.pong_idx is not None:
+                if val_next.resource_index is not None and val_next.resource_index != state.pong_idx:
+                    logger.debug(f"Adding copy: resource {val_next.resource_index} -> pong {state.pong_idx}")
+                    state.copy_from_resource = val_next.resource_index
+            
+            state.next_value = val_next
+    finally:
+        # Exit loop context after processing body
+        ctx.exit_loop()
     
     # Emit PASS_LOOP_END
     next_values = [s.next_value for s in state_vars]

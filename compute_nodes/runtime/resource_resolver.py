@@ -193,12 +193,29 @@ class ResourceResolver:
             # Also check if source is itself dynamic
             if getattr(source_res, 'dynamic_size', False):
                 return ResourceLifetime.AFTER_LOOP
+        # Check if this resource was created inside a loop body
+        # loop_body_resource is set during graph extraction when handlers know they're in a loop
+        is_loop_body_resource = getattr(res_desc, 'loop_body_resource', False)
         
-        # Check width/height/depth expressions
+        if is_loop_body_resource:
+            # Resources created inside loop body are always ON_DEMAND
+            # They need to be evaluated/resized during each iteration
+            return ResourceLifetime.ON_DEMAND
+        
+        # Check width/height/depth expressions for external resources
+        # External outputs (is_internal=False) that depend on loop outputs need AFTER_LOOP
+        is_internal = getattr(res_desc, 'is_internal', True)
+        
         for dim in ('width', 'height', 'depth'):
             val = size_expr.get(dim)
             if val and self._depends_on_loop_resource(val, graph):
-                return ResourceLifetime.AFTER_LOOP
+                if not is_internal:
+                    # External output depending on loop output -> AFTER_LOOP
+                    return ResourceLifetime.AFTER_LOOP
+                else:
+                    # Internal non-loop-body resource with loop dependency -> AFTER_LOOP
+                    # This catches things like Capture.001 that are AFTER the loop
+                    return ResourceLifetime.AFTER_LOOP
         
         # Dynamic but not loop-dependent
         return ResourceLifetime.ON_DEMAND
@@ -218,10 +235,9 @@ class ResourceResolver:
         if res_idx is not None and res_idx < len(graph.resources):
             res = graph.resources[res_idx]
             name = getattr(res, 'name', '')
-            # Loop ping-pong buffers have these patterns
+            # Only loop ping-pong buffers are considered "loop outputs"
+            # Dynamic internal resources like resize_Resize should NOT be flagged
             if 'loop_' in name or '_ping' in name or '_pong' in name:
-                return True
-            if getattr(res, 'dynamic_size', False):
                 return True
         
         # Check origin op's inputs recursively

@@ -90,7 +90,8 @@ def handle_resize(node, ctx):
         dimensions=dims,
         is_internal=True,
         dynamic_size=is_dynamic,
-        size_expression=size_expression
+        size_expression=size_expression,
+        loop_body_resource=ctx.in_loop_body  # Mark as loop body resource for proper classification
     )
     val_output = builder.add_resource(desc)
     
