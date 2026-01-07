@@ -25,6 +25,7 @@ from typing import Dict, Any, Optional
 from ..planner.loops import PassLoop
 from ..ir.resources import ImageDesc
 from .pass_runner import PassRunner
+from .execution_state import ExecutionState
 
 logger = logging.getLogger(__name__)
 
@@ -60,14 +61,19 @@ class LoopExecutor:
         self.gpu_ops = gpu_ops
     
     def execute(self, graph, loop: PassLoop, texture_map: dict,
+                state: ExecutionState,
                 context_width: int, context_height: int) -> None:
         """
         Execute a complete loop with all iterations.
+        
+        After execution, updates state.resource_sizes with final output sizes,
+        enabling correct resolution of post-loop resources.
         
         Args:
             graph: IR Graph containing resources
             loop: PassLoop definition with state_vars and body_passes
             texture_map: Dict mapping resource index -> GPU texture
+            state: ExecutionState to update with final sizes
             context_width: Default width for new textures
             context_height: Default height for new textures
         """
@@ -84,14 +90,17 @@ class LoopExecutor:
         
         # 3. Execute iterations
         for iter_idx in range(iterations):
+            # Update state loop context
+            state.set_loop_context(iter_idx, iterations)
+            
             self._execute_iteration(
                 graph, loop, iter_idx, iterations,
                 texture_map, ping_pong, dynamic_resources,
                 context_width, context_height
             )
         
-        # 4. Finalize - assign final buffers and resize outputs
-        self._finalize_loop(graph, loop, iterations, texture_map, ping_pong)
+        # 4. Finalize - assign final buffers, resize outputs, update state
+        self._finalize_loop(graph, loop, iterations, texture_map, ping_pong, state)
         
         logger.info(f"Loop completed: {iterations} iterations")
     
@@ -244,6 +253,10 @@ class LoopExecutor:
                                  context_height: int) -> None:
         """Evaluate and apply dynamic resource sizes for current iteration."""
         for res_idx, res_desc in dynamic_resources.items():
+            # Skip resources that are pending allocation (not in texture_map yet)
+            if res_idx not in texture_map:
+                continue
+            
             size_expr = getattr(res_desc, 'size_expression', {})
             if not size_expr:
                 continue
@@ -297,15 +310,16 @@ class LoopExecutor:
             self.gpu_ops.copy_texture(src_tex, dst, format=fmt, dimensions=state.dimensions)
     
     def _finalize_loop(self, graph, loop: PassLoop, iterations: int,
-                        texture_map: dict, ping_pong: dict) -> None:
-        """Finalize loop: assign final buffers and resize outputs."""
+                        texture_map: dict, ping_pong: dict,
+                        state: ExecutionState) -> None:
+        """Finalize loop: assign final buffers, resize outputs, update state."""
         pong_to_size = {}
         
         # Assign final buffers
         for buf_info in ping_pong.values():
-            state = buf_info['state']
+            state_var = buf_info['state']
             
-            copy_from = getattr(state, 'copy_from_resource', None)
+            copy_from = getattr(state_var, 'copy_from_resource', None)
             if copy_from is not None and copy_from in texture_map:
                 final_buf = texture_map[copy_from]
             else:
@@ -318,7 +332,13 @@ class LoopExecutor:
             texture_map[buf_info['ping_idx']] = final_buf
             texture_map[buf_info['pong_idx']] = final_buf
             pong_to_size[buf_info['pong_idx']] = (final_buf.width, final_buf.height)
-            logger.debug(f"Loop end: state {state.name} final size {final_buf.width}x{final_buf.height}")
+            
+            # UPDATE ExecutionState with final size
+            # This is the critical update that enables post-loop resource resolution
+            state.update_size(buf_info['ping_idx'], final_buf.width, final_buf.height, 1)
+            state.update_size(buf_info['pong_idx'], final_buf.width, final_buf.height, 1)
+            
+            logger.debug(f"Loop end: state {state_var.name} final size {final_buf.width}x{final_buf.height}")
         
         # Resize outputs to match loop states
         self._resize_outputs(graph, texture_map, pong_to_size)

@@ -1,5 +1,8 @@
 import bpy
+import logging
 from nodeitems_utils import NodeCategory, NodeItem
+
+logger = logging.getLogger(__name__)
 
 class ComputeNodeCategory(NodeCategory):
     @classmethod
@@ -115,7 +118,7 @@ def register():
         bpy.types.NODE_MT_add.append(draw_repeat_zone_in_menu)
         
     except Exception as e:
-        print(f"Failed to register node categories: {e}")
+        logger.warning(f"Failed to register node categories: {e}")
 
 def unregister():
     try:
@@ -128,4 +131,4 @@ def unregister():
             bpy.types.NODE_MT_add.remove(draw_repeat_zone_in_menu)
         
     except Exception as e:
-        print(f"Failed to unregister node categories: {e}")
+        logger.warning(f"Failed to unregister node categories: {e}")

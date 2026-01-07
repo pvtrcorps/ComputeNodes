@@ -193,7 +193,55 @@ New pass when:
 1. **Capture** materializes a Field tree
 2. **Sample** reads from a Grid
 
----
+### 5.4 Runtime Architecture (Refactored January 2026)
+
+The runtime execution layer is organized into specialized components:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  COMPILATION LAYER                                          │
+│                                                             │
+│  GraphCompiler ─────────► PassScheduler                     │
+│  (LRU cache)              ├── _phase1_initial_partition()   │
+│                           ├── _phase2_propagate_field_deps()│
+│                           ├── _phase3_recalculate_resources()│
+│                           ├── _phase4_calculate_dispatch()  │
+│                           ├── _phase5_wrap_loops()          │
+│                           └── _phase6_split_by_size()       │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│  EXECUTION LAYER                                            │
+│                                                             │
+│  ComputeExecutor (orchestrator)                             │
+│  ├── PassRunner (single pass execution)                     │
+│  │   ├── Shader compilation & binding                       │
+│  │   ├── Texture binding (sampler vs image)                 │
+│  │   └── Dispatch calculation & execution                   │
+│  └── LoopExecutor (multi-pass loops)                        │
+│      ├── Ping-pong buffer management                        │
+│      ├── Dynamic size evaluation                            │
+│      └── State copy & resize                                │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│  RESOURCE LAYER                                             │
+│                                                             │
+│  TextureManager ─────────► Named texture cache              │
+│  DynamicTexturePool ─────► Size-based texture pooling       │
+│  ResourceResolver ─────────► IR resources → GPU textures    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Files:**
+| File | Responsibility |
+|------|----------------|
+| `planner/graph_compiler.py` | LRU-cached graph compilation |
+| `planner/scheduler.py` | PassScheduler with 6 phases |
+| `runtime/executor.py` | Orchestration only (~100 lines) |
+| `runtime/pass_runner.py` | Single pass execution |
+| `runtime/loop_executor.py` | Loop/ping-pong handling |
+| `runtime/textures.py` | DynamicTexturePool |
 
 ## 6. Resolution Model
 

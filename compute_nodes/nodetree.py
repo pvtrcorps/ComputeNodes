@@ -2,7 +2,10 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 import math
+import logging
 from bpy.types import NodeTree, Node, NodeSocket
+
+logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
 # GPU Drawing Utilities for Node Coloring
@@ -117,7 +120,7 @@ class ComputeNodeTree(NodeTree):
         except AttributeError:
              pass # Likely _RestrictData during registration
         except Exception as e:
-            print(f"Interface sync failed: {e}")
+            logger.warning(f"Interface sync failed: {e}")
 
         # 2. Sync Reroute Nodes (Visual Fix)
         self._sync_reroute_nodes()
@@ -129,7 +132,7 @@ class ComputeNodeTree(NodeTree):
                 import bpy
                 execute_compute_tree(self, bpy.context)
             except Exception as e:
-                print(f"Tree update failed: {e}")
+                logger.error(f"Tree update failed: {e}")
 
     def _sync_reroute_nodes(self):
         """
@@ -147,7 +150,7 @@ class ComputeNodeTree(NodeTree):
                 from .operators import execute_compute_tree
                 execute_compute_tree(self, context)
             except Exception as e:
-                print(f"Auto-execute trigger failed: {e}")
+                logger.error(f"Auto-execute trigger failed: {e}")
 
     auto_execute: bpy.props.BoolProperty(
         name="Auto Execute",
@@ -294,6 +297,6 @@ class ComputeNode(Node):
                 import bpy
                 execute_compute_tree(tree, bpy.context)
         except Exception as e:
-            print(f"Node update failed: {e}")
+            logger.error(f"Node update failed: {e}")
 
 

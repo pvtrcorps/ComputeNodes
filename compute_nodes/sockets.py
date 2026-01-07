@@ -100,7 +100,7 @@ class ComputeSocketGrid(NodeSocket):
         set_socket_shape(self, 'grid')
     
     def draw_color(self, context, node):
-        return (0.6, 0.6, 0.6, 1.0)  # Cyan
+        return (1.0, 0.85, 0.2, 1.0)  # Cyan
 
     def draw(self, context, layout, node, text):
         # Ensure shape is set (in case init_socket wasn't called)

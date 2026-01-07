@@ -19,6 +19,7 @@ import logging
 import gpu
 
 from ..planner.passes import ComputePass
+from ..errors import ShaderCompileError, TextureBindError, DispatchError
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +136,15 @@ class PassRunner:
                 writes_idx=compute_pass.writes_idx,
                 dispatch_size=compute_pass.dispatch_size
             )
+        except ShaderCompileError:
+            # Re-raise specific error as-is
+            raise
         except Exception as e:
-            logger.error(f"Shader compilation failed for pass {compute_pass.id}: {e}")
-            return None
+            raise ShaderCompileError(
+                f"Shader compilation failed for pass {compute_pass.id}",
+                source=src,
+                error_message=str(e)
+            ) from e
     
     def _bind_textures(self, shader, graph, compute_pass: ComputePass, texture_map: dict):
         """
@@ -169,7 +176,11 @@ class PassRunner:
                     # Write or read-write: bind as image2D
                     shader.image(uniform_name, tex)
             except Exception as e:
-                logger.error(f"Failed to bind {uniform_name}: {e}")
+                raise TextureBindError(
+                    f"Failed to bind {uniform_name}",
+                    uniform_name=uniform_name,
+                    texture_size=(tex.width, tex.height) if tex else None
+                ) from e
     
     def _calculate_dispatch_size(self, compute_pass: ComputePass, texture_map: dict,
                                   context_width: int, context_height: int) -> tuple:
@@ -246,7 +257,11 @@ class PassRunner:
         try:
             gpu.compute.dispatch(shader, group_x, group_y, group_z)
         except Exception as e:
-            logger.error(f"Dispatch failed: {e}")
+            raise DispatchError(
+                f"Dispatch failed for pass {compute_pass.id}",
+                dispatch_size=(dispatch_w, dispatch_h, dispatch_d),
+                pass_id=compute_pass.id
+            ) from e
         
         # Profiling: stop timer and attribute time
         if profiling:

@@ -5,6 +5,8 @@ import gpu
 import platform
 import ctypes
 
+from ..errors import GPUDispatchError, CopyTextureError, ShaderCompileError
+
 logger = logging.getLogger(__name__)
 
 class GPUOps:
@@ -50,7 +52,11 @@ class GPUOps:
         try:
             gpu.compute.dispatch(shader, group_x, group_y, group_z)
         except Exception as e:
-            logger.error(f"Copy dispatch failed: {e}")
+            raise CopyTextureError(
+                f"Copy dispatch failed: {e}",
+                src_size=(width, height, depth),
+                format=format
+            ) from e
         
         self.memory_barrier()
         logger.debug(f"Texture copy ({dimensions}D, {format}): {width}x{height}x{depth}")
@@ -91,8 +97,11 @@ class GPUOps:
             self._copy_shader_cache[key] = shader
             return shader
         except Exception as e:
-            logger.error(f"Failed to compile copy shader ({format}, {dimensions}D): {e}")
-            raise
+            raise ShaderCompileError(
+                f"Failed to compile copy shader ({format}, {dimensions}D)",
+                source=copy_src,
+                error_message=str(e)
+            ) from e
 
     def memory_barrier(self):
         """

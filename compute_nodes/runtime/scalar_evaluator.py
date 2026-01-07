@@ -474,6 +474,36 @@ class ScalarEvaluator:
             h = max(0.0, min(1.0, 0.5 + 0.5 * (a - b) / k))
             return a * h + b * (1.0 - h) + k * h * (1.0 - h)
         
+        # === IMAGE_SIZE (Grid Info) ===
+        # Returns size of texture from grid_sizes dict
+        if opcode == OpCode.IMAGE_SIZE:
+            # Get resource index from input
+            if inputs and len(inputs) > 0:
+                img_val = inputs[0]
+                res_idx = getattr(img_val, 'resource_index', None)
+                if res_idx is not None and res_idx in context.grid_sizes:
+                    size = context.grid_sizes[res_idx]
+                    # Return as tuple (width, height, depth)
+                    return size
+            # Fallback to context dimensions
+            return (context.context_width, context.context_height, context.context_depth)
+        
+        # === SWIZZLE ===
+        # Extract component from vector/tuple
+        if opcode == OpCode.SWIZZLE:
+            vec = self._eval_input(inputs, 0, context)
+            mask = attrs.get('mask', 'x')
+            
+            # Handle tuple/list results from IMAGE_SIZE
+            if isinstance(vec, (tuple, list)):
+                idx_map = {'x': 0, 'y': 1, 'z': 2, 'w': 3}
+                idx = idx_map.get(mask, 0)
+                if idx < len(vec):
+                    return float(vec[idx])
+                return 0.0
+            # Scalar passthrough
+            return float(vec) if isinstance(vec, (int, float)) else 0.0
+        
         # === UNKNOWN ===
         logger.warning(f"ScalarEvaluator: Unknown opcode {opcode}, returning 0")
         return 0.0

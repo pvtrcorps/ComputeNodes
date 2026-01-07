@@ -66,35 +66,62 @@ def handle_capture(node, ctx):
             # It's a CONSTANT op - extract static value
             return int(val.origin.attrs['value']), False, None
         
-        # Check if it comes from IMAGE_SIZE
-        if val.origin and val.origin.opcode == OpCode.IMAGE_SIZE:
-            img_input = val.origin.inputs[0] if val.origin.inputs else None
+        def is_loop_resource(res):
+            """Check if resource comes from a loop output (size changes at runtime)."""
+            if res is None:
+                return False
+            name = getattr(res, 'name', '')
+            # Loop ping-pong buffers have these patterns
+            if 'loop_' in name or '_ping' in name or '_pong' in name:
+                return True
+            # Resources marked as dynamic
+            if getattr(res, 'dynamic_size', False):
+                return True
+            return False
+        
+        def get_resource_from_image_size(image_size_op):
+            """Extract resource from IMAGE_SIZE op if possible."""
+            if not image_size_op or image_size_op.opcode != OpCode.IMAGE_SIZE:
+                return None
+            img_input = image_size_op.inputs[0] if image_size_op.inputs else None
             if img_input and img_input.resource_index is not None:
                 graph = builder.graph
                 if img_input.resource_index < len(graph.resources):
-                    res = graph.resources[img_input.resource_index]
-                    if hasattr(res, 'size') and res.size:
-                        if socket_name == 'Width' and len(res.size) > 0:
-                            return res.size[0], False, None
-                        elif socket_name == 'Height' and len(res.size) > 1:
-                            return res.size[1], False, None
+                    return graph.resources[img_input.resource_index]
+            return None
+        
+        # Check if it comes from IMAGE_SIZE
+        if val.origin and val.origin.opcode == OpCode.IMAGE_SIZE:
+            res = get_resource_from_image_size(val.origin)
+            if res:
+                # If resource comes from loop, mark as DYNAMIC
+                if is_loop_resource(res):
+                    logger.info(f"Capture '{node.name}': {socket_name} from loop resource - marking DYNAMIC")
+                    return int(socket.default_value), True, val
+                # Static resource - use compile-time size
+                if hasattr(res, 'size') and res.size:
+                    if socket_name == 'Width' and len(res.size) > 0:
+                        return res.size[0], False, None
+                    elif socket_name == 'Height' and len(res.size) > 1:
+                        return res.size[1], False, None
         
         # Check if val is from SWIZZLE of IMAGE_SIZE (Grid Info connected)
         if val.origin and val.origin.opcode == OpCode.SWIZZLE:
             swizzle_input = val.origin.inputs[0] if val.origin.inputs else None
             if swizzle_input and swizzle_input.origin and swizzle_input.origin.opcode == OpCode.IMAGE_SIZE:
-                img_size_op = swizzle_input.origin
-                img_input = img_size_op.inputs[0] if img_size_op.inputs else None
-                if img_input and img_input.resource_index is not None:
-                    graph = builder.graph
-                    if img_input.resource_index < len(graph.resources):
-                        res = graph.resources[img_input.resource_index]
-                        if hasattr(res, 'size') and res.size:
-                            mask = val.origin.attrs.get('mask', 'x')
-                            idx = {'x': 0, 'y': 1, 'z': 2}.get(mask, 0)
-                            if idx < len(res.size):
-                                logger.info(f"Capture '{node.name}': Extracted {socket_name}={res.size[idx]} from Grid Info")
-                                return res.size[idx], False, None
+                res = get_resource_from_image_size(swizzle_input.origin)
+                if res:
+                    # If resource comes from loop, mark as DYNAMIC
+                    if is_loop_resource(res):
+                        logger.info(f"Capture '{node.name}': {socket_name} from loop resource via Grid Info - marking DYNAMIC")
+                        return int(socket.default_value), True, val
+                    # Static resource - use compile-time size
+                    if hasattr(res, 'size') and res.size:
+                        mask = val.origin.attrs.get('mask', 'x')
+                        idx = {'x': 0, 'y': 1, 'z': 2}.get(mask, 0)
+                        if idx < len(res.size):
+                            logger.info(f"Capture '{node.name}': Extracted {socket_name}={res.size[idx]} from Grid Info")
+                            return res.size[idx], False, None
         
         # It's a dynamic value
         logger.info(f"Capture '{node.name}': {socket_name} is dynamic (non-constant)")

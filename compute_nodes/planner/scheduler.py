@@ -40,130 +40,201 @@ def collect_field_dependencies(op: Op, collected: Set[int], all_deps: List[Op]):
                 all_deps.append(dep_op)
 
 
-def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
+class PassScheduler:
     """
-    Partitions the graph into a list of executable ComputePasses.
-    Handles hazard detection (Read-After-Write) by splitting passes.
-    Also calculates dispatch_size for each pass based on output dimensions.
+    Schedules IR ops into executable ComputePasses.
     
-    Field Dependency Handling:
-    - After initial pass split, ensures each pass has all field ops it needs
-    - Pure field ops (Position, Noise, Math) are duplicated across passes
+    The scheduling process has 6 phases:
+    1. Initial partitioning (hazard detection, resource limits)
+    2. Field dependency propagation
+    3. Resource access recalculation
+    4. Dispatch size calculation
+    5. Loop wrapping (PassLoop structures)
+    6. Size-based splitting
+    
+    Example:
+        scheduler = PassScheduler(graph)
+        passes = scheduler.schedule()
     """
-    ops = get_topological_sort(graph)
-    passes: List[ComputePass] = []
-    
-    current_pass = ComputePass(pass_id=0)
-    dirtied_resources: Set[int] = set()
-    op_to_pass: Dict[int, int] = {}  # Track which pass each op was originally assigned to
     
     # Maximum unique resources per pass (GPU binding limit is typically 8)
     MAX_RESOURCES_PER_PASS = 7
     
-    for op in ops:
-        # Check for Hazards
-        # Does this op read something written in current pass?
-        should_split = find_hazards(op, dirtied_resources)
+    def __init__(self, graph: Graph):
+        """
+        Initialize scheduler with graph to process.
         
-        # Also check resource limit - prevent exceeding GPU binding slots
-        if not should_split:
-            op_reads = set(op.reads_resources())
-            op_writes = set(op.writes_resources())
-            future_resources = (current_pass.reads_idx | current_pass.writes_idx | 
-                               op_reads | op_writes)
-            if len(future_resources) > MAX_RESOURCES_PER_PASS:
-                should_split = True
+        Args:
+            graph: IR Graph containing ops and resources
+        """
+        self.graph = graph
+        self.ops = get_topological_sort(graph)
+        self._pass_counter = 0
+    
+    def schedule(self) -> List[Union[ComputePass, 'PassLoop']]:
+        """
+        Execute all scheduling phases and return passes.
         
-        if should_split:
-            # SPLIT PASS
+        Returns:
+            List of ComputePass and PassLoop items ready for execution
+        """
+        # Phase 1: Initial partitioning
+        passes = self._phase1_initial_partition()
+        
+        # Phase 2: Field dependency propagation
+        self._phase2_propagate_field_deps(passes)
+        
+        # Phase 3: Recalculate reads/writes
+        self._phase3_recalculate_resources(passes)
+        
+        # Phase 4: Calculate dispatch sizes
+        self._phase4_calculate_dispatch(passes)
+        
+        # Phase 5: Wrap in PassLoop structures
+        passes = self._phase5_wrap_loops(passes)
+        
+        # Phase 6: Split by output size
+        passes = self._phase6_split_by_size(passes)
+        
+        return passes
+    
+    def _new_pass_id(self) -> int:
+        """Generate unique pass ID."""
+        pid = self._pass_counter
+        self._pass_counter += 1
+        return pid
+    
+    def _phase1_initial_partition(self) -> List[ComputePass]:
+        """
+        Phase 1: Partition ops into passes based on hazards and resource limits.
+        
+        - Read-After-Write hazards force pass splits
+        - Resource count exceeding GPU limits forces splits
+        """
+        passes: List[ComputePass] = []
+        current_pass = ComputePass(pass_id=self._new_pass_id())
+        dirtied_resources: Set[int] = set()
+        
+        for op in self.ops:
+            # Check for hazards
+            should_split = find_hazards(op, dirtied_resources)
+            
+            # Check resource limit
+            if not should_split:
+                op_reads = set(op.reads_resources())
+                op_writes = set(op.writes_resources())
+                future_resources = (current_pass.reads_idx | current_pass.writes_idx | 
+                                   op_reads | op_writes)
+                if len(future_resources) > self.MAX_RESOURCES_PER_PASS:
+                    should_split = True
+            
+            if should_split:
+                passes.append(current_pass)
+                current_pass = ComputePass(pass_id=self._new_pass_id())
+                dirtied_resources.clear()
+            
+            # Add op to current pass
+            current_pass.add_op(op)
+            
+            # Track writes
+            for res_idx in op.writes_resources():
+                dirtied_resources.add(res_idx)
+                res = self.graph.resources[res_idx]
+                current_pass.writes.add(res)
+                current_pass.writes_idx.add(res_idx)
+            
+            # Track reads
+            for res_idx in op.reads_resources():
+                res = self.graph.resources[res_idx]
+                current_pass.reads.add(res)
+                current_pass.reads_idx.add(res_idx)
+        
+        # Append final pass
+        if current_pass.ops:
             passes.append(current_pass)
-            new_id = len(passes)
-            current_pass = ComputePass(pass_id=new_id)
-            dirtied_resources.clear()
+        
+        return passes
+    
+    def _phase2_propagate_field_deps(self, passes: List[ComputePass]) -> None:
+        """
+        Phase 2: Ensure each pass has all field ops it depends on.
+        
+        Pure field ops (Position, Math, Noise) are duplicated across passes
+        that need them.
+        """
+        for p in passes:
+            ops_in_pass = {id(op) for op in p.ops}
+            deps_to_add = []
+            collected = set()
             
-        # Add op to current pass
-        current_pass.add_op(op)
-        op_to_pass[id(op)] = current_pass.id
-        
-        # Track Writes
-        writes = op.writes_resources()
-        for res_idx in writes:
-            dirtied_resources.add(res_idx)
-            # Add to pass metadata
-            res = graph.resources[res_idx]
-            current_pass.writes.add(res)
-            current_pass.writes_idx.add(res_idx)
+            for op in p.ops:
+                collect_field_dependencies(op, collected, deps_to_add)
             
-        # Track Reads
-        reads = op.reads_resources()
-        for res_idx in reads:
-             res = graph.resources[res_idx]
-             current_pass.reads.add(res)
-             current_pass.reads_idx.add(res_idx)
-             
-    # Append final pass
-    if current_pass.ops:
-        passes.append(current_pass)
+            new_deps = [dep for dep in deps_to_add if id(dep) not in ops_in_pass]
+            
+            if new_deps:
+                p.ops = new_deps + p.ops
     
-    # ===== PHASE 2: Ensure field dependencies are in each pass =====
-    # For each pass, check if ops use SSA values from other passes
-    # If so, and the source is a pure field op, include it in this pass
-    for p in passes:
-        ops_in_pass = {id(op) for op in p.ops}
-        deps_to_add = []
-        collected = set()
+    def _phase3_recalculate_resources(self, passes: List[ComputePass]) -> None:
+        """
+        Phase 3: Recalculate reads/writes for all ops in each pass.
         
-        for op in p.ops:
-            # Collect all field dependencies
-            collect_field_dependencies(op, collected, deps_to_add)
-        
-        # Filter to deps NOT already in this pass
-        new_deps = [dep for dep in deps_to_add if id(dep) not in ops_in_pass]
-        
-        # Prepend all new deps at once (preserves order)
-        if new_deps:
-            p.ops = new_deps + p.ops
-            for dep in new_deps:
-                ops_in_pass.add(id(dep))
+        Needed because Phase 2 adds ops that weren't tracked initially.
+        """
+        for p in passes:
+            for op in p.ops:
+                for res_idx in op.reads_resources():
+                    res = self.graph.resources[res_idx]
+                    p.reads.add(res)
+                    p.reads_idx.add(res_idx)
+                for res_idx in op.writes_resources():
+                    res = self.graph.resources[res_idx]
+                    p.writes.add(res)
+                    p.writes_idx.add(res_idx)
     
-    # ===== PHASE 2.5: Recalculate reads/writes for all ops in each pass =====
-    # This ensures that ops added during field dependency propagation 
-    # (like SAMPLE from auto-sample) have their resource accesses tracked
-    for p in passes:
-        for op in p.ops:
-            # Track Reads
-            reads = op.reads_resources()
-            for res_idx in reads:
-                res = graph.resources[res_idx]
-                p.reads.add(res)
-                p.reads_idx.add(res_idx)
-            # Track Writes
-            writes = op.writes_resources()
-            for res_idx in writes:
-                res = graph.resources[res_idx]
-                p.writes.add(res)
-                p.writes_idx.add(res_idx)
+    def _phase4_calculate_dispatch(self, passes: List[ComputePass]) -> None:
+        """Phase 4: Calculate dispatch_size for each pass."""
+        for p in passes:
+            _calculate_dispatch_size(p, self.graph)
     
-    # Calculate dispatch_size for each pass based on write resources
-    for p in passes:
-        _calculate_dispatch_size(p, graph)
-    
-    # ===== PHASE 4: Detect PASS_LOOP regions and wrap in PassLoop =====
-    # Find PASS_LOOP_BEGIN/END pairs and wrap intervening passes
-    loop_regions = find_loop_regions(ops)
-    if loop_regions:
-        passes = wrap_passes_in_loops(passes, loop_regions, ops, graph)
+    def _phase5_wrap_loops(self, passes: List[ComputePass]) -> List[Union[ComputePass, 'PassLoop']]:
+        """
+        Phase 5: Detect PASS_LOOP regions and wrap in PassLoop structures.
         
-        # PHASE 4.5: Re-apply field dependency propagation to loop body passes
-        # wrap_passes_in_loops recreates passes from raw ops, losing Phase 2 deps
-        _propagate_field_deps_recursive(passes, graph)
-    
-    # ===== PHASE 5: Split passes by output size =====
-    # When a pass writes to resources with different sizes, split into separate passes
-    # This ensures correct UV/dispatch calculations for each output
-    passes = _split_passes_by_output_size(passes, graph)
+        Also re-applies field dependency propagation to loop bodies.
+        """
+        loop_regions = find_loop_regions(self.ops)
+        if not loop_regions:
+            return passes
         
-    return passes
+        wrapped = wrap_passes_in_loops(passes, loop_regions, self.ops, self.graph)
+        _propagate_field_deps_recursive(wrapped, self.graph)
+        return wrapped
+    
+    def _phase6_split_by_size(self, passes: list) -> list:
+        """
+        Phase 6: Split passes that write to resources with different sizes.
+        
+        Ensures each pass has a single dispatch size for correct UV calculations.
+        """
+        return _split_passes_by_output_size(passes, self.graph)
+
+
+def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
+    """
+    Partitions the graph into a list of executable ComputePasses.
+    
+    This is the main entry point for scheduling. Uses PassScheduler internally.
+    
+    Args:
+        graph: IR Graph to schedule
+        
+    Returns:
+        List of ComputePass and PassLoop items
+    """
+    scheduler = PassScheduler(graph)
+    return scheduler.schedule()
+
 
 
 def _propagate_field_deps_to_pass(p: ComputePass, graph: Graph):

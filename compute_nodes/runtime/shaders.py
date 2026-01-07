@@ -144,14 +144,18 @@ class ShaderManager:
             return shader
             
         except Exception as e:
-            print(f"Shader compile error: {e}")
-            # Log source for debugging
-            print("--- SHADER SOURCE ---")
+            # Use proper logging instead of print
+            from ..errors import ShaderCompileError
+            
+            error_msg = f"Shader compile error: {e}"
+            logger.error(error_msg)
+            logger.error("--- SHADER SOURCE ---")
             lines = source.split('\n')
             for i, line in enumerate(lines):
-                print(f"{i+1:03d}: {line}")
-            print("---------------------")
-            raise
+                logger.error(f"{i+1:03d}: {line}")
+            logger.error("---------------------")
+            
+            raise ShaderCompileError(error_msg, source=source, error_message=str(e))
 
     def clear(self):
         """Clear the shader cache."""

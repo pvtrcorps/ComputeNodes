@@ -9,6 +9,7 @@ import bpy
 import gpu
 
 from ..ir.resources import ImageDesc
+from ..errors import TextureCreateError, TextureReadbackError
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,11 @@ class TextureManager:
             texture = gpu.texture.from_image(image)
             return texture
         except Exception as e:
-            logger.error(f"Failed to create texture from image {image.name}: {e}")
-            raise
+            raise TextureCreateError(
+                f"Failed to create texture from image {image.name}",
+                size=(image.size[0], image.size[1]),
+                format=image.colorspace_settings.name
+            ) from e
 
     def create_storage_texture(self, name: str, width: int, height: int, 
                                format: str = "RGBA32F") -> gpu.types.GPUTexture:
@@ -47,8 +51,11 @@ class TextureManager:
             self._internal_textures[name] = texture
             return texture
         except Exception as e:
-            logger.error(f"Failed to create storage texture {name}: {e}")
-            raise
+            raise TextureCreateError(
+                f"Failed to create storage texture {name}",
+                size=(width, height),
+                format=fmt
+            ) from e
 
     def ensure_internal_texture(self, name: str, desc: ImageDesc) -> gpu.types.GPUTexture:
         """Get or create an internal GPU texture based on the descriptor.
@@ -97,8 +104,11 @@ class TextureManager:
             logger.debug(f"Created {dims}D texture '{name}': {size}, format={fmt}")
             return texture
         except Exception as e:
-            logger.error(f"Failed to create {dims}D texture {name}: {e}")
-            raise
+            raise TextureCreateError(
+                f"Failed to create {dims}D texture {name}",
+                size=size,
+                format=fmt
+            ) from e
 
     def readback_to_image(self, texture: gpu.types.GPUTexture, 
                           image: bpy.types.Image) -> bool:
@@ -134,8 +144,11 @@ class TextureManager:
             return True
             
         except Exception as e:
-            logger.error(f"Readback failed: {e}")
-            return False
+            raise TextureReadbackError(
+                f"Readback failed for {image.name if image else 'unknown'}",
+                texture_size=(texture.width, texture.height) if texture else None,
+                image_name=image.name if image else None
+            ) from e
 
     def clear_texture(self, texture: gpu.types.GPUTexture, 
                       color: tuple = (0.0, 0.0, 0.0, 1.0)):
@@ -220,8 +233,11 @@ class DynamicTexturePool:
             return texture
             
         except Exception as e:
-            self._logger.error(f"DynamicPool: failed to create {dims}D texture {size}: {e}")
-            raise
+            raise TextureCreateError(
+                f"DynamicPool: failed to create {dims}D texture",
+                size=size,
+                format=format
+            ) from e
     
     def release(self, texture: gpu.types.GPUTexture) -> None:
         """Return a texture to the pool for reuse."""
