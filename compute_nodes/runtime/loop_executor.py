@@ -1,26 +1,44 @@
 """
-LoopExecutor - Executes Repeat Zones with ping-pong buffering.
+LoopExecutor - GLSL-First Loop Execution with Explicit Texture Copies.
 
-This module extracts the loop execution logic from the monolithic
-ComputeExecutor, providing cleaner separation of concerns.
+This module implements the GLSL-native pattern for multi-pass loops:
+- Dedicated read/write buffers (never share the same GPUTexture)
+- Explicit copies between IMAGE and SAMPLER usage
+- Proper ping-pong with memory barriers
 
-Key Concepts:
-    Ping-Pong Buffering: When a shader reads AND writes the same resource,
-    we use two buffers and alternate between them:
-    - Iteration 0: Read from PING, write to PONG
-    - Iteration 1: Read from PONG, write to PING
-    - ...and so on
+Key Principle:
+    In pure GLSL, you NEVER bind the same texture as IMAGE (for writes)
+    and then as SAMPLER (for reads) across passes. This causes undefined
+    behavior on many GPU drivers. Instead, we:
+    1. Use separate textures for reading and writing
+    2. Copy data explicitly between them
+    3. Issue memory barriers after each copy
 
-Responsibilities:
-- Setup ping-pong buffers for Grid states
-- Evaluate dynamic sizes per iteration
-- Swap buffers between iterations
-- Execute body passes via PassRunner
-- Resize outputs to match final loop state sizes
+Architecture:
+    ┌───────────────────────────────────────────────────────────┐
+    │  Pre-Loop: Write initial values to internal buffers       │
+    │  Pass 101_1: imageStore(initial_A, red)                   │
+    └───────────────────────────────────────────────────────────┘
+                              ↓ COPY
+    ┌───────────────────────────────────────────────────────────┐
+    │  Loop Setup: Copy initial → dedicated ping buffer         │
+    │  gpu_ops.copy_texture(initial_A → A.ping)                 │
+    └───────────────────────────────────────────────────────────┘
+                              ↓
+    ┌───────────────────────────────────────────────────────────┐
+    │  Iteration 0: Read=ping, Write=pong                       │
+    │  Iteration 1: Read=pong, Write=ping                       │
+    │  (Each iteration gets clean read from previous write)     │
+    └───────────────────────────────────────────────────────────┘
+                              ↓
+    ┌───────────────────────────────────────────────────────────┐
+    │  Finalize: Copy final buffer → output                     │
+    └───────────────────────────────────────────────────────────┘
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+import gpu
 
 from ..planner.loops import PassLoop
 from ..ir.resources import ImageDesc
@@ -32,17 +50,12 @@ logger = logging.getLogger(__name__)
 
 class LoopExecutor:
     """
-    Executes multi-pass loops with automatic ping-pong buffering.
+    Executes multi-pass loops using GLSL-native texture handling.
     
-    Handles the complex logic of:
-    - Buffer allocation and swapping
-    - Dynamic size evaluation per iteration
-    - State copying between iterations
-    - Output resizing after loop completion
-    
-    Example:
-        loop_exec = LoopExecutor(pass_runner, resolver, texture_mgr, gpu_ops)
-        loop_exec.execute(graph, loop, texture_map, 512, 512)
+    Ensures proper GPU state by:
+    - Never sharing texture objects between IMAGE and SAMPLER bindings
+    - Using explicit copies between passes
+    - Maintaining clean ping-pong buffer separation
     """
     
     def __init__(self, pass_runner: PassRunner, resolver, texture_mgr, gpu_ops):
@@ -64,10 +77,7 @@ class LoopExecutor:
                 state: ExecutionState,
                 context_width: int, context_height: int) -> None:
         """
-        Execute a complete loop with all iterations.
-        
-        After execution, updates state.resource_sizes with final output sizes,
-        enabling correct resolution of post-loop resources.
+        Execute a complete loop with GLSL-first texture handling.
         
         Args:
             graph: IR Graph containing resources
@@ -78,29 +88,24 @@ class LoopExecutor:
             context_height: Default height for new textures
         """
         iterations = self._resolve_iterations(loop)
-        logger.info(f"Running loop: {iterations} iterations, {len(loop.state_vars)} state vars")
+        logger.info(f"Loop: {iterations} iterations, {len(loop.state_vars)} states")
         
-        # 1. Setup ping-pong buffers
-        ping_pong = self._setup_ping_pong_buffers(
-            loop, texture_map, context_width, context_height
-        )
+        # Phase 1: Create dedicated ping/pong buffers and copy initial data
+        ping_pong = self._create_dedicated_buffers(loop, texture_map, graph)
         
-        # 2. Get dynamic resources for size evaluation
+        # Phase 2: Get dynamic resources for iteration-specific size evaluation
         dynamic_resources = self.resolver.get_dynamic_resources()
         
-        # 3. Execute iterations
+        # Phase 3: Execute all iterations
         for iter_idx in range(iterations):
-            # Update state loop context
-            state.set_loop_context(iter_idx, iterations)
-            
             self._execute_iteration(
                 graph, loop, iter_idx, iterations,
                 texture_map, ping_pong, dynamic_resources,
                 state, context_width, context_height
             )
         
-        # 4. Finalize - assign final buffers, resize outputs, update state
-        self._finalize_loop(graph, loop, iterations, texture_map, ping_pong, state)
+        # Phase 4: Finalize - update texture_map and state with final buffers
+        self._finalize_loop(graph, loop, texture_map, ping_pong, iterations, state)
         
         logger.info(f"Loop completed: {iterations} iterations")
     
@@ -113,252 +118,323 @@ class LoopExecutor:
             return 10  # Default fallback
         return int(iterations)
     
-    def _setup_ping_pong_buffers(self, loop: PassLoop, texture_map: dict,
-                                  context_width: int, context_height: int) -> Dict[int, dict]:
+    def _create_dedicated_buffers(self, loop: PassLoop, texture_map: dict, 
+                                   graph) -> Dict[int, dict]:
         """
-        Allocate and initialize ping-pong buffers for Grid states.
+        Create DEDICATED ping/pong buffers for each state.
         
-        Returns:
-            Dict mapping state.index -> {ping, pong, ping_idx, pong_idx, state}
+        CRITICAL: We create NEW textures, NOT references to existing ones.
+        Then we COPY initial data into the ping buffer.
+        
+        This ensures:
+        - Initial texture (used as IMAGE in pre-loop) stays separate
+        - Ping buffer (used as SAMPLER in loop) has its own GPU state
         """
         ping_pong = {}
         
         for state in loop.state_vars:
-            if not (state.is_grid and state.ping_idx is not None and state.pong_idx is not None):
-                continue
+            # Get initial value info
+            init_idx = None
+            init_tex = None
             
-            fmt = getattr(state, 'format', 'RGBA32F')
-            size = state.size if state.size != (0, 0, 0) else (context_width, context_height, 1)
+            if state.initial_value is not None:
+                init_idx = getattr(state.initial_value, 'resource_index', None)
+                if init_idx is not None and init_idx in texture_map:
+                    init_tex = texture_map[init_idx]
             
-            # Ensure ping buffer exists
-            if state.ping_idx not in texture_map:
-                desc = ImageDesc(
-                    name=f"loop_ping_{state.name}",
-                    access='READ_WRITE',
-                    format=fmt,
-                    size=size,
-                    dimensions=state.dimensions,
-                    is_internal=True
-                )
-                tex = self.texture_mgr.ensure_internal_texture(desc.name, desc)
-                texture_map[state.ping_idx] = tex
+            # Determine buffer size from initial texture or state definition
+            if init_tex is not None:
+                width, height = init_tex.width, init_tex.height
+                fmt = getattr(graph.resources[init_idx], 'format', 'RGBA32F')
+            else:
+                width, height = state.size if state.size else (512, 512)
+                fmt = 'RGBA32F'
             
-            # Ensure pong buffer exists
-            if state.pong_idx not in texture_map:
-                desc = ImageDesc(
-                    name=f"loop_pong_{state.name}",
-                    access='READ_WRITE',
-                    format=fmt,
-                    size=size,
-                    dimensions=state.dimensions,
-                    is_internal=True
-                )
-                tex = self.texture_mgr.ensure_internal_texture(desc.name, desc)
-                texture_map[state.pong_idx] = tex
+            # Create FRESH ping buffer (never shared with initial texture)
+            ping_tex = gpu.types.GPUTexture(
+                size=(width, height),
+                format=fmt
+            )
+            
+            # Create FRESH pong buffer
+            pong_tex = gpu.types.GPUTexture(
+                size=(width, height),
+                format=fmt
+            )
+            
+            # CRITICAL: Copy initial data into ping buffer
+            if init_tex is not None:
+                logger.debug(f"State '{state.name}': copying initial data {width}x{height}")
+                self.gpu_ops.copy_texture(init_tex, ping_tex, format=fmt)
+            
+            # Update texture_map with our dedicated buffers
+            texture_map[state.ping_idx] = ping_tex
+            texture_map[state.pong_idx] = pong_tex
             
             ping_pong[state.index] = {
-                'ping': texture_map[state.ping_idx],
-                'pong': texture_map[state.pong_idx],
+                'ping': ping_tex,
+                'pong': pong_tex,
                 'ping_idx': state.ping_idx,
                 'pong_idx': state.pong_idx,
-                'state': state
+                'state': state,
+                'current_size': (width, height),
+                'format': fmt
             }
             
-            # Map initial value to ping buffer
-            if state.initial_value is not None and hasattr(state.initial_value, 'resource_index'):
-                init_idx = state.initial_value.resource_index
-                if init_idx is not None and init_idx in texture_map:
-                    ping_pong[state.index]['original_ping'] = texture_map[state.ping_idx]
-                    texture_map[state.ping_idx] = texture_map[init_idx]
-                    ping_pong[state.index]['ping'] = texture_map[init_idx]
-                    logger.info(f"Loop init: mapping ping[{state.ping_idx}] -> initial[{init_idx}]")
+            logger.debug(f"State '{state.name}': ping[{state.ping_idx}]={width}x{height}, "
+                        f"pong[{state.pong_idx}]={width}x{height}")
+        
+        # Memory barrier after all initial copies
+        self.gpu_ops.memory_barrier()
         
         return ping_pong
     
-    def _execute_iteration(self, graph, loop: PassLoop, iter_idx: int, total_iterations: int,
-                           texture_map: dict, ping_pong: dict, dynamic_resources: dict,
-                           state: ExecutionState, context_width: int, context_height: int) -> None:
-        """Execute a single loop iteration."""
+    def _execute_iteration(self, graph, loop: PassLoop, iter_idx: int,
+                           total_iterations: int, texture_map: dict,
+                           ping_pong: dict, dynamic_resources: dict,
+                           state: ExecutionState, 
+                           context_width: int, context_height: int) -> None:
+        """
+        Execute a single loop iteration.
         
-        # 1. Swap ping-pong buffers
+        Ping-Pong Pattern:
+        - Even iterations (0, 2, 4...): Read from PING, write to PONG
+        - Odd iterations (1, 3, 5...): Read from PONG, write to PING
+        """
+        # Set up buffer roles for this iteration
         self._swap_buffers(iter_idx, ping_pong, texture_map)
         
-        # 2. Update loop context for uniforms
-        loop_context = self._build_loop_context(
-            iter_idx, ping_pong, context_width, context_height
-        )
-        self.pass_runner.set_loop_context(**loop_context)
-        
-        # 3. Evaluate dynamic sizes
+        # Evaluate and apply dynamic sizes for this iteration
         self._evaluate_dynamic_sizes(
-            iter_idx, dynamic_resources, texture_map, context_width, context_height
+            graph, loop, texture_map, dynamic_resources, 
+            state, context_width, context_height,
+            current_iteration=iter_idx
         )
-        
-        # 4. Execute body passes
+
+
+        # Execute body passes
         for body_pass in loop.body_passes:
+            # Set loop iteration uniform
+            body_pass.loop_iteration = iter_idx
+            
+            # Handle nested loops recursively
             if hasattr(body_pass, 'body_passes'):
-                # Nested loop - recursive call with state
-                self.execute(graph, body_pass, texture_map, state, context_width, context_height)
-            else:
-                self.pass_runner.run(graph, body_pass, texture_map, context_width, context_height)
-        
-        # 5. Handle copy-back and state resizing
-        self._handle_state_copies(iter_idx, loop, texture_map, ping_pong, dynamic_resources)
-        
-        # 6. Memory barrier
-        self.gpu_ops.memory_barrier()
-    
-    def _swap_buffers(self, iter_idx: int, ping_pong: dict, texture_map: dict) -> None:
-        """Swap ping-pong buffers based on iteration parity."""
-        for buf_info in ping_pong.values():
-            if iter_idx % 2 == 0:
-                texture_map[buf_info['ping_idx']] = buf_info['ping']
-                texture_map[buf_info['pong_idx']] = buf_info['pong']
-            else:
-                texture_map[buf_info['ping_idx']] = buf_info['pong']
-                texture_map[buf_info['pong_idx']] = buf_info['ping']
-    
-    def _build_loop_context(self, iter_idx: int, ping_pong: dict,
-                            context_width: int, context_height: int) -> dict:
-        """Build loop context dict for shader uniforms."""
-        if not ping_pong:
-            return {
-                'iteration': iter_idx,
-                'read_width': context_width,
-                'read_height': context_height,
-                'write_width': context_width,
-                'write_height': context_height,
-            }
-        
-        first_state_idx = next(iter(ping_pong.keys()))
-        buf_info = ping_pong[first_state_idx]
-        
-        if iter_idx % 2 == 0:
-            read_buf = buf_info['ping']
-            write_buf = buf_info['pong']
-        else:
-            read_buf = buf_info['pong']
-            write_buf = buf_info['ping']
-        
-        return {
-            'iteration': iter_idx,
-            'read_width': read_buf.width if read_buf else 0,
-            'read_height': read_buf.height if read_buf else 0,
-            'write_width': write_buf.width if write_buf else 0,
-            'write_height': write_buf.height if write_buf else 0,
-        }
-    
-    def _evaluate_dynamic_sizes(self, iter_idx: int, dynamic_resources: dict,
-                                 texture_map: dict, context_width: int, 
-                                 context_height: int) -> None:
-        """Evaluate and apply dynamic resource sizes for current iteration."""
-        for res_idx, res_desc in dynamic_resources.items():
-            # Skip resources that are pending allocation (not in texture_map yet)
-            if res_idx not in texture_map:
-                continue
-            
-            size_expr = getattr(res_desc, 'size_expression', {})
-            if not size_expr:
-                continue
-            
-            new_size = self.resolver.evaluate_dynamic_size(
-                res_desc, iter_idx, context_width, context_height
-            )
-            current_size = (texture_map[res_idx].width, texture_map[res_idx].height)
-            
-            if new_size != current_size:
-                logger.info(f"Dynamic resize (iter {iter_idx}): {res_desc.name} {current_size} -> {new_size}")
-                new_tex = self.resolver.dynamic_pool.get_or_create(
-                    new_size, res_desc.format, res_desc.dimensions
+                self.execute(
+                    graph, body_pass, texture_map, state,
+                    context_width, context_height
                 )
-                texture_map[res_idx] = new_tex
-                self.resolver.update_grid_size(res_idx, new_size[0], new_size[1])
+            else:
+                self.pass_runner.run(
+                    graph, body_pass, texture_map,
+                    context_width, context_height
+                )
+        
+        # After body execution: copy results to appropriate buffers
+        self._handle_state_copies(iter_idx, loop, texture_map, ping_pong)
+    
+    def _swap_buffers(self, iter_idx: int, ping_pong: dict, 
+                      texture_map: dict) -> None:
+        """
+        Configure texture_map for correct read/write roles this iteration.
+        
+        This sets up which buffer the shader will READ from (as sampler)
+        and which it will WRITE to (as image).
+        """
+        for buf_info in ping_pong.values():
+            ping_idx = buf_info['ping_idx']
+            pong_idx = buf_info['pong_idx']
+            
+            if iter_idx % 2 == 0:
+                # Even: Read from ping, write to pong
+                texture_map[ping_idx] = buf_info['ping']
+                texture_map[pong_idx] = buf_info['pong']
+            else:
+                # Odd: Read from pong, write to ping
+                texture_map[ping_idx] = buf_info['pong']
+                texture_map[pong_idx] = buf_info['ping']
     
     def _handle_state_copies(self, iter_idx: int, loop: PassLoop,
-                              texture_map: dict, ping_pong: dict,
-                              dynamic_resources: dict) -> None:
-        """Handle copy-back operations and resize states if needed."""
-        for state in loop.state_vars:
-            if not hasattr(state, 'copy_from_resource') or state.copy_from_resource is None:
-                continue
-            
-            src_idx = state.copy_from_resource
-            if src_idx not in texture_map:
-                continue
-            
-            src_tex = texture_map[src_idx]
-            src_size = (src_tex.width, src_tex.height)
-            
-            # Determine current destination buffer
-            dst_key = 'pong' if iter_idx % 2 == 0 else 'ping'
-            dst = ping_pong[state.index][dst_key]
-            dst_size = (dst.width, dst.height)
-            
-            # Check if resize needed
-            if src_idx in dynamic_resources or src_size != dst_size:
-                if src_size != dst_size:
-                    logger.info(f"Dynamic state resize: {state.name} {dst_size} -> {src_size}")
-                    fmt = getattr(state, 'format', 'RGBA32F')
-                    new_buf = self.resolver.dynamic_pool.get_or_create(
-                        src_size, fmt, state.dimensions
-                    )
-                    ping_pong[state.index][dst_key] = new_buf
-                    dst = new_buf
-            
-            # Copy texture
-            fmt = getattr(state, 'format', 'RGBA32F')
-            self.gpu_ops.copy_texture(src_tex, dst, format=fmt, dimensions=state.dimensions)
-    
-    def _finalize_loop(self, graph, loop: PassLoop, iterations: int,
-                        texture_map: dict, ping_pong: dict,
-                        state: ExecutionState) -> None:
-        """Finalize loop: assign final buffers, resize outputs, update state."""
-        pong_to_size = {}
+                             texture_map: dict, ping_pong: dict) -> None:
+        """
+        Copy loop body outputs (e.g., Capture.002) to the write buffer.
         
-        # Assign final buffers
+        This ensures the next iteration reads the correct data.
+        Also handles size changes when the capture has different resolution.
+        """
+        for state_idx, buf_info in ping_pong.items():
+            state = buf_info['state']
+            copy_from_idx = getattr(state, 'copy_from_resource', None)
+            
+            if copy_from_idx is None:
+                continue
+            
+            # Source: what the loop body wrote to
+            src_tex = texture_map.get(copy_from_idx)
+            if src_tex is None:
+                continue
+            
+            src_size = (src_tex.width, src_tex.height)
+            current_size = buf_info['current_size']
+            fmt = buf_info['format']
+            
+            # Determine destination buffer (the one we're writing to this iter)
+            if iter_idx % 2 == 0:
+                dst_key = 'pong'
+            else:
+                dst_key = 'ping'
+            
+            dst_tex = buf_info[dst_key]
+            
+            # Handle size change: resize only the DESTINATION buffer
+            # The other buffer will be resized when it becomes the destination
+            if src_size != (dst_tex.width, dst_tex.height):
+                logger.debug(f"State '{state.name}': resize {dst_key} {(dst_tex.width, dst_tex.height)} -> {src_size}")
+                
+                # Create new destination buffer at correct size
+                new_dst = gpu.types.GPUTexture(
+                    size=src_size,
+                    format=fmt
+                )
+                
+                # Update only the destination
+                buf_info[dst_key] = new_dst
+                dst_tex = new_dst
+                
+                # Update texture_map for destination
+                dst_idx = buf_info['pong_idx'] if dst_key == 'pong' else buf_info['ping_idx']
+                texture_map[dst_idx] = new_dst
+                
+                # Update current_size
+                buf_info['current_size'] = src_size
+            
+            # EXPLICIT COPY: source -> destination
+            self.gpu_ops.copy_texture(src_tex, dst_tex, format=fmt)
+        
+        # Memory barrier after all copies
+        self.gpu_ops.memory_barrier()
+    
+    def _evaluate_dynamic_sizes(self, graph, loop: PassLoop, texture_map: dict,
+                                 dynamic_resources: dict, state: ExecutionState,
+                                 context_width: int, context_height: int,
+                                 current_iteration: int = 0) -> None:
+        """
+        Evaluate and allocate dynamic-sized resources for this iteration.
+        
+        For loop body resources with dynamic sizes, we MUST re-evaluate
+        on each iteration because the size may depend on the iteration index.
+        """
+        for res_idx, res in dynamic_resources.items():
+            # Skip resources not relevant to this loop
+            if not getattr(res, 'loop_body_resource', False):
+                continue
+            
+            # Evaluate size expression with CURRENT iteration
+            width, height = self.resolver.evaluate_dynamic_size(
+                res, current_iteration, context_width, context_height,
+                texture_map=texture_map
+            )
+            depth = 1  # 2D textures for now
+            
+            # Check if we need to (re)allocate
+            existing_tex = texture_map.get(res_idx)
+            needs_alloc = (existing_tex is None or
+                          existing_tex.width != width or
+                          existing_tex.height != height)
+            
+            if needs_alloc:
+                # Create texture at evaluated size
+                tex = gpu.types.GPUTexture(
+                    size=(width, height) if depth == 1 else (width, height, depth),
+                    format=getattr(res, 'format', 'RGBA32F')
+                )
+                texture_map[res_idx] = tex
+                
+                # Update state
+                state.update_size(res_idx, width, height, depth)
+                
+                logger.debug(f"Dynamic resource [{res_idx}] '{res.name}': {width}x{height} (iter {current_iteration})")
+    
+    def _finalize_loop(self, graph, loop: PassLoop, texture_map: dict,
+                       ping_pong: dict, iterations: int,
+                       state: ExecutionState) -> None:
+        """
+        Finalize loop: set up final buffers for post-loop passes.
+        
+        After N iterations:
+        - The last iteration wrote to the "write" buffer
+        - For even iters (0,2,4): last write was to pong
+        - For odd iters (1,3): last write was to ping
+        
+        But since _handle_state_copies ran AFTER writing, the data is in:
+        - Even iters: pong (we copied src -> pong)
+        - Odd iters: ping (we copied src -> ping)
+        """
         for buf_info in ping_pong.values():
             state_var = buf_info['state']
             
-            copy_from = getattr(state_var, 'copy_from_resource', None)
-            if copy_from is not None and copy_from in texture_map:
-                final_buf = texture_map[copy_from]
+            # The final buffer is where we last copied data TO
+            # After iter N-1, we copied to the "dst" buffer for that iteration
+            # iter 0: dst=pong, iter 1: dst=ping, iter 2: dst=pong, iter 3: dst=ping
+            # So for iterations=4 (iters 0,1,2,3), last was iter 3 which wrote to ping
+            last_iter = iterations - 1
+            if last_iter % 2 == 0:
+                final_buf = buf_info['pong']
             else:
-                if iterations % 2 == 1:
-                    final_buf = buf_info['pong']
-                else:
-                    final_buf = buf_info['ping']
+                final_buf = buf_info['ping']
             
-            # Update both indices to point to final buffer
+            final_size = (final_buf.width, final_buf.height)
+            
+            # Update texture_map - both ping and pong point to final
             texture_map[buf_info['ping_idx']] = final_buf
             texture_map[buf_info['pong_idx']] = final_buf
-            pong_to_size[buf_info['pong_idx']] = (final_buf.width, final_buf.height)
             
-            # UPDATE ExecutionState with final size
-            # This is the critical update that enables post-loop resource resolution
-            state.update_size(buf_info['ping_idx'], final_buf.width, final_buf.height, 1)
-            state.update_size(buf_info['pong_idx'], final_buf.width, final_buf.height, 1)
+            # Update ExecutionState with final size
+            state.update_size(buf_info['ping_idx'], final_size[0], final_size[1], 1)
+            state.update_size(buf_info['pong_idx'], final_size[0], final_size[1], 1)
             
-            logger.debug(f"Loop end: state {state_var.name} final size {final_buf.width}x{final_buf.height}")
+            logger.debug(f"Loop end: state '{state_var.name}' final={final_size[0]}x{final_size[1]}")
+            logger.debug(f"Loop end: state '{state_var.name}' final={final_size[0]}x{final_size[1]}")
         
-        # Resize outputs to match loop states
-        self._resize_outputs(graph, texture_map, pong_to_size)
+        # Resize external outputs to match loop states
+        self._resize_outputs(graph, texture_map, ping_pong, state)
     
-    def _resize_outputs(self, graph, texture_map: dict, pong_to_size: dict) -> None:
+    def _resize_outputs(self, graph, texture_map: dict, ping_pong: dict,
+                        state: ExecutionState) -> None:
         """Resize external outputs to match their source state sizes."""
-        pong_indices = sorted(pong_to_size.keys())
-        output_indices = sorted([
-            idx for idx, res in enumerate(graph.resources)
-            if hasattr(res, 'is_internal') and not res.is_internal
-        ])
+        pong_indices = {buf_info['pong_idx']: buf_info for buf_info in ping_pong.values()}
         
-        for pong_idx, output_idx in zip(pong_indices, output_indices):
-            pong_size = pong_to_size[pong_idx]
-            if output_idx in texture_map:
-                current = texture_map[output_idx]
-                if (current.width, current.height) != pong_size:
-                    res_desc = graph.resources[output_idx]
-                    new_tex = self.resolver.dynamic_pool.get_or_create(
-                        pong_size, 'RGBA32F', getattr(res_desc, 'dimensions', 2)
-                    )
-                    texture_map[output_idx] = new_tex
-                    logger.info(f"Resized output[{output_idx}] to {pong_size} to match loop state")
+        for idx, res in enumerate(graph.resources):
+            if getattr(res, 'is_internal', True):
+                continue
+            
+            # Check if this output depends on a loop state
+            size_expr = getattr(res, 'size_expression', None)
+            if size_expr is None:
+                continue
+            
+            source_idx = getattr(size_expr, 'source_resource', None)
+            if source_idx is None or source_idx not in pong_indices:
+                continue
+            
+            # Get final size from the source state
+            buf_info = pong_indices[source_idx]
+            final_size = buf_info['current_size']
+            
+            # Resize output texture if needed
+            old_tex = texture_map.get(idx)
+            if old_tex is None:
+                continue
+            
+            old_size = (old_tex.width, old_tex.height)
+            if old_size == final_size:
+                continue
+            
+            # Create new texture at correct size
+            new_tex = gpu.types.GPUTexture(
+                size=final_size,
+                format=getattr(res, 'format', 'RGBA32F')
+            )
+            texture_map[idx] = new_tex
+            state.update_size(idx, final_size[0], final_size[1], 1)
+            
+            logger.debug(f"Output [{idx}] resized: {old_size} -> {final_size}")

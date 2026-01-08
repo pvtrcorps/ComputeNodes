@@ -427,17 +427,23 @@ class ResourceResolver:
         pass
     
     def evaluate_dynamic_size(self, res_desc, iteration: int, 
-                               context_width: int, context_height: int) -> tuple:
+                               context_width: int, context_height: int,
+                               texture_map: dict = None) -> tuple:
         """
-        Backward-compatible method for loop_executor.
+        Evaluate dynamic size for a resource during loop execution.
         
-        Creates a temporary ExecutionState for size evaluation.
+        Uses texture_map to get actual sizes for IMAGE_SIZE lookups.
         """
         temp_state = ExecutionState(
             context_width=context_width,
             context_height=context_height
         )
         temp_state.set_loop_context(iteration, iteration + 1)
+        
+        # Populate resource_sizes from texture_map for IMAGE_SIZE lookups
+        if texture_map:
+            for res_idx, tex in texture_map.items():
+                temp_state.update_size(res_idx, tex.width, tex.height, 1)
         
         return self._evaluate_size_with_state(res_desc, temp_state)[:2]
     

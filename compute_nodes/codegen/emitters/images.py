@@ -291,9 +291,6 @@ def emit_sample(op, ctx):
             uv_type = uv_input.type
         else:
             # Use inline normalized UVs based on the SOURCE texture size
-            # This handles cases where multiple read textures have different sizes
-            # Using textureSize(sampler) ensures correct UV mapping when source
-            # and destination textures have the same dimensions
             if is_3d:
                 uv = f"((vec3(gl_GlobalInvocationID.xyz) + vec3(0.5)) / vec3(textureSize({sampler}, 0)))"
                 uv_type = DataType.VEC3
@@ -302,9 +299,7 @@ def emit_sample(op, ctx):
                 uv_type = DataType.VEC2
         
         # Type check: ensure coordinate matches texture dimensionality
-        # Handler should have already adjusted this, but safety check
         if is_3d and uv_available and uv_type == DataType.VEC2:
-            # Edge case: still got VEC2 for 3D texture, project to middle slice
             uv = f"vec3({uv}, 0.5)"
         
         return f"{lhs}texture({sampler}, {uv});"

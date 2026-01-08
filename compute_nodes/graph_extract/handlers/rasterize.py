@@ -168,7 +168,8 @@ def handle_capture(node, ctx):
         size=size,
         dimensions=dims,
         dynamic_size=is_dynamic,
-        size_expression=size_expression if is_dynamic else {}
+        size_expression=size_expression if is_dynamic else {},
+        loop_body_resource=ctx.in_loop_body  # Mark as loop body resource for proper classification
     )
     val_output = builder.add_resource(desc)
     
