@@ -93,8 +93,11 @@ class LoopExecutor:
         # Phase 1: Create dedicated ping/pong buffers and copy initial data
         ping_pong = self._create_dedicated_buffers(loop, texture_map, graph)
         
-        # Phase 2: Get dynamic resources for iteration-specific size evaluation
-        dynamic_resources = self.resolver.get_dynamic_resources()
+        # Phase 2: Get dynamic resources relevant to this loop scope
+        # We ONLY evaluate resources written by this loop's direct passes.
+        # This prevents inner loops from re-evaluating outer resources (perf & correctness).
+        all_dynamic = self.resolver.get_dynamic_resources()
+        dynamic_resources = self._filter_resources_for_loop(loop, all_dynamic)
         
         # Phase 3: Execute all iterations
         for iter_idx in range(iterations):
@@ -109,6 +112,27 @@ class LoopExecutor:
         
         logger.info(f"Loop completed: {iterations} iterations")
     
+    def _filter_resources_for_loop(self, loop: PassLoop, all_dynamic: dict) -> dict:
+        """
+        Filter dynamic resources to only those WRITTEN by this loop's direct passes.
+        
+        This is critical for nested loops:
+        1. Performance: Inner loops (e.g. 100 iters) won't re-eval outer resources.
+        2. Correctness: Inner loops won't eval outer resources with wrong iteration index.
+        3. Isolation: Parent loops won't eval child loop resources.
+        """
+        written_indices = set()
+        for item in loop.body_passes:
+            # Only consider direct ComputePass children (has writes_idx)
+            # Nested PassLoops are opaque here - they handle their own resources
+            if hasattr(item, 'writes_idx'):
+                written_indices.update(item.writes_idx)
+        
+        return {
+            idx: res for idx, res in all_dynamic.items()
+            if idx in written_indices
+        }
+
     def _resolve_iterations(self, loop: PassLoop) -> int:
         """Resolve iteration count from loop definition."""
         iterations = loop.iterations
@@ -329,9 +353,11 @@ class LoopExecutor:
                 continue
             
             # Evaluate size expression with CURRENT iteration
+            # Passing 'state' avoids O(N) overhead inside resolver
             width, height = self.resolver.evaluate_dynamic_size(
                 res, current_iteration, context_width, context_height,
-                texture_map=texture_map
+                texture_map=texture_map,
+                state=state
             )
             depth = 1  # 2D textures for now
             

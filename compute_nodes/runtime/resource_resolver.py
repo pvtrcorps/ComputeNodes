@@ -428,24 +428,39 @@ class ResourceResolver:
     
     def evaluate_dynamic_size(self, res_desc, iteration: int, 
                                context_width: int, context_height: int,
-                               texture_map: dict = None) -> tuple:
+                               texture_map: dict = None,
+                               state: ExecutionState = None) -> tuple:
         """
         Evaluate dynamic size for a resource during loop execution.
         
-        Uses texture_map to get actual sizes for IMAGE_SIZE lookups.
+        Args:
+            state: Optional existing ExecutionState. If provided, used directly
+                   (avoiding expensive recreation and texture map iteration).
         """
-        temp_state = ExecutionState(
-            context_width=context_width,
-            context_height=context_height
-        )
-        temp_state.set_loop_context(iteration, iteration + 1)
+        if state:
+            # OPTIMIZED PATH: Use existing state (maintained by executor)
+            # Need to temporarily set loop context if not already matching
+            # But caller (LoopExecutor) should have updated it.
+            # We assume state has up-to-date sizes.
+            calc_state = state
+            
+            # Ensure iteration matches (executor might maintain it, but we can enforce)
+            if hasattr(calc_state, 'set_loop_context'):
+                 calc_state.set_loop_context(iteration, iteration + 1)
+        else:
+            # SLOW PATH: Create temp state (legacy/fallback)
+            calc_state = ExecutionState(
+                context_width=context_width,
+                context_height=context_height
+            )
+            calc_state.set_loop_context(iteration, iteration + 1)
+            
+            # Populate resource_sizes from texture_map
+            if texture_map:
+                for res_idx, tex in texture_map.items():
+                    calc_state.update_size(res_idx, tex.width, tex.height, 1)
         
-        # Populate resource_sizes from texture_map for IMAGE_SIZE lookups
-        if texture_map:
-            for res_idx, tex in texture_map.items():
-                temp_state.update_size(res_idx, tex.width, tex.height, 1)
-        
-        return self._evaluate_size_with_state(res_desc, temp_state)[:2]
+        return self._evaluate_size_with_state(res_desc, calc_state)[:2]
     
     def cleanup(self):
         """Release pooled textures."""
