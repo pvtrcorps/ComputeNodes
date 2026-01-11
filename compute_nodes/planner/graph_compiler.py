@@ -150,9 +150,16 @@ class GraphCompiler:
         # Graph name for disambiguation
         hasher.update(graph.name.encode())
         
-        # Number of resources and ops
+        # Number of resources
         hasher.update(f"resources:{len(graph.resources)}".encode())
-        hasher.update(f"ops:{len(graph.ops)}".encode())
+        
+        # Collect all ops from all blocks for hashing
+        # Ops are typically ordered, so block order + op order is stable
+        all_ops = []
+        for block in graph.blocks:
+            all_ops.extend(block.ops)
+            
+        hasher.update(f"ops:{len(all_ops)}".encode())
         
         # Resource descriptors
         for i, res in enumerate(graph.resources):
@@ -164,7 +171,7 @@ class GraphCompiler:
             hasher.update(res_str.encode())
         
         # Op structure (opcode + input count)
-        for i, op in enumerate(graph.ops):
+        for i, op in enumerate(all_ops):
             op_str = f"op{i}:{op.opcode.name}:inputs={len(op.inputs)}"
             hasher.update(op_str.encode())
         

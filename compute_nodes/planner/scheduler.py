@@ -8,19 +8,46 @@ from .loops import PassLoop, find_loop_regions, wrap_passes_in_loops
 
 
 # Ops that are "pure" field operations - no side effects, safe to duplicate
+# These ops can be safely copied into multiple passes when their output is used across pass boundaries
 PURE_FIELD_OPS = {
-    OpCode.BUILTIN, OpCode.CONSTANT, OpCode.ADD, OpCode.SUB, OpCode.MUL, 
-    OpCode.DIV, OpCode.CAST, OpCode.SWIZZLE, OpCode.COMBINE_XYZ, OpCode.COMBINE_XY,
-    OpCode.SEPARATE_XYZ, OpCode.SEPARATE_COLOR, OpCode.DOT, OpCode.CROSS,
-    OpCode.NORMALIZE, OpCode.LENGTH, OpCode.DISTANCE, OpCode.MIN, OpCode.MAX, OpCode.ABS,
-    OpCode.FLOOR, OpCode.CEIL, OpCode.FRACT, OpCode.MOD, OpCode.POW,
-    OpCode.SQRT, OpCode.SIN, OpCode.COS, OpCode.TAN,
-    OpCode.NOISE, OpCode.VORONOI, OpCode.COMPARE, OpCode.SELECT,
-    OpCode.SNAP, OpCode.WRAP, OpCode.CLAMP, OpCode.MAP_RANGE,
-    OpCode.MIX, OpCode.MULTIPLY_ADD,
-    OpCode.SAMPLE,  # Read-only operation, safe to duplicate across passes
-    OpCode.IMAGE_SIZE,  # Read-only metadata query, safe to duplicate
+    # Arithmetic
+    OpCode.ADD, OpCode.SUB, OpCode.MUL, OpCode.DIV, OpCode.MOD,
+    OpCode.MULTIPLY_ADD, OpCode.WRAP, OpCode.SNAP, OpCode.PINGPONG,
+    
+    # Math / Common
+    OpCode.ABS, OpCode.SIGN, OpCode.FLOOR, OpCode.CEIL, OpCode.FRACT,
+    OpCode.TRUNC, OpCode.ROUND, OpCode.MIN, OpCode.MAX,
+    OpCode.SMOOTH_MIN, OpCode.SMOOTH_MAX, OpCode.CLAMP, OpCode.MIX,
+    
+    # Exponential
+    OpCode.POW, OpCode.SQRT, OpCode.INVERSE_SQRT, OpCode.EXP, OpCode.LOG,
+    
+    # Trigonometry
+    OpCode.SIN, OpCode.COS, OpCode.TAN, OpCode.ASIN, OpCode.ACOS,
+    OpCode.ATAN, OpCode.ATAN2, OpCode.SINH, OpCode.COSH, OpCode.TANH,
+    OpCode.RADIANS, OpCode.DEGREES,
+    
+    # Vector
+    OpCode.DOT, OpCode.CROSS, OpCode.LENGTH, OpCode.DISTANCE, OpCode.NORMALIZE,
+    OpCode.REFLECT, OpCode.REFRACT, OpCode.FACEFORWARD, OpCode.PROJECT,
+    
+    # Relational / Comparison
+    OpCode.EQ, OpCode.NEQ, OpCode.LT, OpCode.GT, OpCode.LE, OpCode.GE, OpCode.COMPARE,
+    
+    # Logic
+    OpCode.AND, OpCode.OR, OpCode.NOT, OpCode.SELECT,
+    
+    # Constructors / Conversion
+    OpCode.CAST, OpCode.SWIZZLE, OpCode.SEPARATE_XYZ, OpCode.COMBINE_XY, OpCode.COMBINE_XYZ,
+    OpCode.SEPARATE_COLOR, OpCode.COMBINE_COLOR, OpCode.MAP_RANGE, OpCode.CLAMP_RANGE,
+    
+    # Texture / Procedural (read-only, safe to duplicate)
+    OpCode.SAMPLE, OpCode.NOISE, OpCode.WHITE_NOISE, OpCode.VORONOI, OpCode.IMAGE_SIZE,
+    
+    # Inputs (constants and builtins are always safe)
+    OpCode.CONSTANT, OpCode.BUILTIN,
 }
+
 
 
 def is_pure_field_op(op: Op) -> bool:
@@ -95,6 +122,9 @@ class PassScheduler:
         
         # Phase 6: Split by output size
         passes = self._phase6_split_by_size(passes)
+        
+        # Phase 7: Fuse compatible passes (optional optimization)
+        passes = self._phase7_fuse_passes(passes)
         
         return passes
     
@@ -218,6 +248,61 @@ class PassScheduler:
         Ensures each pass has a single dispatch size for correct UV calculations.
         """
         return _split_passes_by_output_size(passes, self.graph)
+    
+    def _phase7_fuse_passes(self, passes: list) -> list:
+        """
+        Phase 7: Fuse compatible consecutive passes to reduce GPU dispatches.
+        
+        Two passes can be fused if:
+        1. Both are ComputePass (not PassLoop)
+        2. Same dispatch size
+        3. No RAW hazard between them
+        4. Combined resources <= MAX_RESOURCES_PER_PASS
+        
+        This is a conservative optimization that maintains correctness.
+        """
+        if len(passes) < 2:
+            return passes
+        
+        result = []
+        i = 0
+        fusions = 0
+        
+        while i < len(passes):
+            current = passes[i]
+            
+            # Only fuse ComputePass, not PassLoop
+            if hasattr(current, 'body_passes'):
+                # PassLoop - process body recursively
+                current.body_passes = self._phase7_fuse_passes(current.body_passes)
+                result.append(current)
+                i += 1
+                continue
+            
+            # Try to fuse with next passes
+            while i + 1 < len(passes):
+                next_pass = passes[i + 1]
+                
+                # Don't fuse across loops
+                if hasattr(next_pass, 'body_passes'):
+                    break
+                
+                # Check if fusible
+                if _can_fuse_passes(current, next_pass, self.MAX_RESOURCES_PER_PASS):
+                    current = _fuse_two_passes(current, next_pass)
+                    fusions += 1
+                    i += 1
+                else:
+                    break
+            
+            result.append(current)
+            i += 1
+        
+        if fusions > 0:
+            from ..logger import log_debug
+            log_debug(f"Pass fusion: {fusions} passes fused, {len(result)} passes remain")
+        
+        return result
 
 
 def schedule_passes(graph: Graph) -> List[Union[ComputePass, PassLoop]]:
@@ -404,3 +489,51 @@ def _split_single_pass_by_size(compute_pass: ComputePass, graph: Graph) -> list:
         result.append(new_pass)
     
     return result
+
+
+def _can_fuse_passes(pass_a: ComputePass, pass_b: ComputePass, max_resources: int) -> bool:
+    """
+    Check if two passes can be safely fused.
+    
+    Criteria:
+    1. Same dispatch size
+    2. No RAW hazard (pass_b doesn't read what pass_a writes)
+    3. Combined resources don't exceed limit
+    """
+    # Must have same dispatch size
+    if pass_a.dispatch_size != pass_b.dispatch_size:
+        return False
+    
+    # Check for RAW hazard: pass_b reads what pass_a writes
+    if pass_a.writes_idx & pass_b.reads_idx:
+        return False
+    
+    # Check resource limit
+    combined_resources = (pass_a.reads_idx | pass_a.writes_idx | 
+                          pass_b.reads_idx | pass_b.writes_idx)
+    if len(combined_resources) > max_resources:
+        return False
+    
+    return True
+
+
+def _fuse_two_passes(pass_a: ComputePass, pass_b: ComputePass) -> ComputePass:
+    """Merge two ComputePasses into one."""
+    fused = ComputePass(pass_id=pass_a.id)  # Keep first pass's ID
+    
+    # Combine ops in order
+    for op in pass_a.ops:
+        fused.add_op(op)
+    for op in pass_b.ops:
+        fused.add_op(op)
+    
+    # Combine resources
+    fused.reads = pass_a.reads | pass_b.reads
+    fused.writes = pass_a.writes | pass_b.writes
+    fused.reads_idx = pass_a.reads_idx | pass_b.reads_idx
+    fused.writes_idx = pass_a.writes_idx | pass_b.writes_idx
+    
+    # Use first pass's dispatch size (should be same)
+    fused.dispatch_size = pass_a.dispatch_size
+    
+    return fused

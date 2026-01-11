@@ -78,29 +78,31 @@ class LoopExecutor:
                 context_width: int, context_height: int) -> None:
         """
         Execute a complete loop with GLSL-first texture handling.
-        
-        Args:
-            graph: IR Graph containing resources
-            loop: PassLoop definition with state_vars and body_passes
-            texture_map: Dict mapping resource index -> GPU texture
-            state: ExecutionState to update with final sizes
-            context_width: Default width for new textures
-            context_height: Default height for new textures
         """
+        print("LoopExec: Starting execute...")
+        
+        # CRITICAL: Save parent loop's iteration context before entering this loop
+        saved_iteration = state.current_iteration
+        saved_total = state.total_iterations
+        
         iterations = self._resolve_iterations(loop)
         logger.info(f"Loop: {iterations} iterations, {len(loop.state_vars)} states")
+        print(f"LoopExec: Resolved {iterations} iters")
         
         # Phase 1: Create dedicated ping/pong buffers and copy initial data
-        ping_pong = self._create_dedicated_buffers(loop, texture_map, graph)
+        print("LoopExec: Creating buffers...")
+        ping_pong = self._create_dedicated_buffers(loop, texture_map, graph, state)
+        print("LoopExec: Buffers created.")
         
         # Phase 2: Get dynamic resources relevant to this loop scope
-        # We ONLY evaluate resources written by this loop's direct passes.
-        # This prevents inner loops from re-evaluating outer resources (perf & correctness).
+        print("LoopExec: Filtering resources...")
         all_dynamic = self.resolver.get_dynamic_resources()
         dynamic_resources = self._filter_resources_for_loop(loop, all_dynamic)
+        print("LoopExec: Resources filtered.")
         
         # Phase 3: Execute all iterations
         for iter_idx in range(iterations):
+            print(f"LoopExec: Iteration {iter_idx}")
             self._execute_iteration(
                 graph, loop, iter_idx, iterations,
                 texture_map, ping_pong, dynamic_resources,
@@ -108,18 +110,17 @@ class LoopExecutor:
             )
         
         # Phase 4: Finalize - update texture_map and state with final buffers
+        print("LoopExec: Finalizing...")
         self._finalize_loop(graph, loop, texture_map, ping_pong, iterations, state)
+        
+        # CRITICAL: Restore parent loop's iteration context after this loop completes
+        state.set_loop_context(saved_iteration, saved_total)
         
         logger.info(f"Loop completed: {iterations} iterations")
     
     def _filter_resources_for_loop(self, loop: PassLoop, all_dynamic: dict) -> dict:
         """
         Filter dynamic resources to only those WRITTEN by this loop's direct passes.
-        
-        This is critical for nested loops:
-        1. Performance: Inner loops (e.g. 100 iters) won't re-eval outer resources.
-        2. Correctness: Inner loops won't eval outer resources with wrong iteration index.
-        3. Isolation: Parent loops won't eval child loop resources.
         """
         written_indices = set()
         for item in loop.body_passes:
@@ -138,12 +139,19 @@ class LoopExecutor:
         iterations = loop.iterations
         if hasattr(iterations, 'constant_value'):
             return int(iterations.constant_value)
+        elif hasattr(iterations, 'resource_index'): 
+             # Handle Value object if applicable, though usually constant
+             print(f"LoopExec: Warning - Iterations is dynamic Value? {iterations}")
+             return 10
         elif not isinstance(iterations, int):
-            return 10  # Default fallback
+            try:
+                return int(iterations)
+            except:
+                return 10  # Default fallback
         return int(iterations)
     
     def _create_dedicated_buffers(self, loop: PassLoop, texture_map: dict, 
-                                   graph) -> Dict[int, dict]:
+                                   graph, exec_state: ExecutionState) -> Dict[int, dict]:
         """
         Create DEDICATED ping/pong buffers for each state.
         
@@ -171,7 +179,12 @@ class LoopExecutor:
                 width, height = init_tex.width, init_tex.height
                 fmt = getattr(graph.resources[init_idx], 'format', 'RGBA32F')
             else:
-                width, height = state.size if state.size else (512, 512)
+                s = state.size if state.size else (512, 512)
+                if len(s) == 3:
+                     width, height, _ = s
+                else:
+                     width, height = s
+                
                 fmt = 'RGBA32F'
             
             # Create FRESH ping buffer (never shared with initial texture)
@@ -189,7 +202,10 @@ class LoopExecutor:
             # CRITICAL: Copy initial data into ping buffer
             if init_tex is not None:
                 logger.debug(f"State '{state.name}': copying initial data {width}x{height}")
+                print(f"[LoopExec] INIT COPY: State '{state.name}' {width}x{height} from Tex#{init_idx} -> Ping (TexID {ping_tex if hasattr(ping_tex, 'id') else '?'})")
                 self.gpu_ops.copy_texture(init_tex, ping_tex, format=fmt)
+            else:
+                print(f"[LoopExec] INIT NO COPY for '{state.name}' (No Init Tex)")
             
             # Update texture_map with our dedicated buffers
             texture_map[state.ping_idx] = ping_tex
@@ -207,6 +223,11 @@ class LoopExecutor:
             
             logger.debug(f"State '{state.name}': ping[{state.ping_idx}]={width}x{height}, "
                         f"pong[{state.pong_idx}]={width}x{height}")
+            
+            # CRITICAL: Update exec_state.resource_sizes so ScalarEvaluator sees correct sizes
+            # for any Capture nodes whose size depends on IMAGE_SIZE of these ping/pong buffers
+            exec_state.update_size(state.ping_idx, width, height, 1)
+            exec_state.update_size(state.pong_idx, width, height, 1)
         
         # Memory barrier after all initial copies
         self.gpu_ops.memory_barrier()
@@ -225,6 +246,9 @@ class LoopExecutor:
         - Even iterations (0, 2, 4...): Read from PING, write to PONG
         - Odd iterations (1, 3, 5...): Read from PONG, write to PING
         """
+        # CRITICAL: Update loop context for this iteration BEFORE any evaluation
+        state.set_loop_context(iter_idx, total_iterations)
+        
         # Set up buffer roles for this iteration
         self._swap_buffers(iter_idx, ping_pong, texture_map)
         
@@ -254,7 +278,7 @@ class LoopExecutor:
                 )
         
         # After body execution: copy results to appropriate buffers
-        self._handle_state_copies(iter_idx, loop, texture_map, ping_pong)
+        self._handle_state_copies(iter_idx, loop, texture_map, ping_pong, state)
     
     def _swap_buffers(self, iter_idx: int, ping_pong: dict, 
                       texture_map: dict) -> None:
@@ -267,18 +291,22 @@ class LoopExecutor:
         for buf_info in ping_pong.values():
             ping_idx = buf_info['ping_idx']
             pong_idx = buf_info['pong_idx']
+            state_name = buf_info['state'].name
             
             if iter_idx % 2 == 0:
                 # Even: Read from ping, write to pong
                 texture_map[ping_idx] = buf_info['ping']
                 texture_map[pong_idx] = buf_info['pong']
+                # print(f"  [Iter {iter_idx}] '{state_name}': Read Ping({ping_idx}), Write Pong({pong_idx})")
             else:
                 # Odd: Read from pong, write to ping
                 texture_map[ping_idx] = buf_info['pong']
                 texture_map[pong_idx] = buf_info['ping']
+                # print(f"  [Iter {iter_idx}] '{state_name}': Read Pong({ping_idx}), Write Ping({pong_idx})")
     
     def _handle_state_copies(self, iter_idx: int, loop: PassLoop,
-                             texture_map: dict, ping_pong: dict) -> None:
+                             texture_map: dict, ping_pong: dict,
+                             exec_state: ExecutionState) -> None:
         """
         Copy loop body outputs (e.g., Capture.002) to the write buffer.
         
@@ -290,11 +318,13 @@ class LoopExecutor:
             copy_from_idx = getattr(state, 'copy_from_resource', None)
             
             if copy_from_idx is None:
+                print(f"[LoopExec] WARNING: State '{state.name}' has no copy_from_resource!")
                 continue
             
             # Source: what the loop body wrote to
             src_tex = texture_map.get(copy_from_idx)
             if src_tex is None:
+                print(f"[LoopExec] ERROR: State '{state.name}' source Tex#{copy_from_idx} missing!")
                 continue
             
             src_size = (src_tex.width, src_tex.height)
@@ -330,8 +360,16 @@ class LoopExecutor:
                 
                 # Update current_size
                 buf_info['current_size'] = src_size
+                
+                # CRITICAL: Update state.resource_sizes so ScalarEvaluator reads correct sizes
+                # Also update BOTH ping and pong indices to the new size
+                ping_idx = buf_info['ping_idx']
+                pong_idx = buf_info['pong_idx']
+                exec_state.update_size(ping_idx, src_size[0], src_size[1], 1)
+                exec_state.update_size(pong_idx, src_size[0], src_size[1], 1)
             
             # EXPLICIT COPY: source -> destination
+            # print(f"  [Iter {iter_idx}] COPY '{state.name}': Res#{copy_from_idx} -> {dst_key} ({src_size[0]}x{src_size[1]})")
             self.gpu_ops.copy_texture(src_tex, dst_tex, format=fmt)
         
         # Memory barrier after all copies
@@ -418,7 +456,6 @@ class LoopExecutor:
             state.update_size(buf_info['ping_idx'], final_size[0], final_size[1], 1)
             state.update_size(buf_info['pong_idx'], final_size[0], final_size[1], 1)
             
-            logger.debug(f"Loop end: state '{state_var.name}' final={final_size[0]}x{final_size[1]}")
             logger.debug(f"Loop end: state '{state_var.name}' final={final_size[0]}x{final_size[1]}")
         
         # Resize external outputs to match loop states

@@ -30,7 +30,19 @@ class ShaderGenerator:
     
     Uses tree-shaking to include only required GLSL library functions,
     dramatically reducing shader compilation time.
+    
+    Optimizations:
+    - SSA inlining: Single-use trivial expressions are inlined to reduce variables
     """
+    
+    # OpCodes that are safe to inline (no side effects, simple expressions)
+    # Note: CAST excluded because it may generate invalid float(vec4) expressions
+    INLINABLE_OPCODES = {
+        OpCode.CONSTRUCT, OpCode.SWIZZLE, 
+        OpCode.ADD, OpCode.SUB, OpCode.MUL, OpCode.DIV,
+        OpCode.CONSTANT, OpCode.BUILTIN, OpCode.COMBINE_XYZ,
+    }
+    
     def __init__(self, graph: Graph):
         self.graph = graph
 
@@ -39,13 +51,17 @@ class ShaderGenerator:
         self._required_bundles: Set[str] = set()
         self._required_funcs: Set[str] = set()
         
+        # SSA inlining: Track which ops to inline vs emit as statements
+        self._inlined_ops: Set[int] = set()  # op ids that will be inlined
+        self._analyze_inlining(compute_pass)
+        
         # Create resource index -> sequential binding slot mapping
         # GPU has max 8 binding slots (0-7), so we must remap sparse indices
         all_indices: List[int] = sorted(list(compute_pass.reads_idx | compute_pass.writes_idx))
         self._binding_map: Dict[int, int] = {res_idx: slot for slot, res_idx in enumerate(all_indices)}
         
         from ..logger import log_debug
-        log_debug(f"Generating GLSL for pass (Ops: {len(compute_pass.ops)})...")
+        log_debug(f"Generating GLSL for pass (Ops: {len(compute_pass.ops)}, Inlined: {len(self._inlined_ops)})...")
         
         # 1. Generate main first to discover required GLSL functions
         main_section = self._generate_main(compute_pass)
@@ -57,6 +73,43 @@ class ShaderGenerator:
         header_section = self._generate_selective_header()
         
         return "\n".join([header_section, bindings_section, main_section])
+    
+    def _analyze_inlining(self, compute_pass: ComputePass) -> None:
+        """
+        Determine which ops can be inlined (emitted inline in expressions).
+        
+        Criteria for inlining:
+        1. Op produces exactly one output
+        2. Output is used exactly once
+        3. Op is a simple expression (in INLINABLE_OPCODES)
+        4. Op is not a side-effect operation
+        """
+        pass_op_ids = {id(op) for op in compute_pass.ops}
+        
+        for op in compute_pass.ops:
+            # Skip if no outputs or multiple outputs
+            if not op.outputs or len(op.outputs) != 1:
+                continue
+            
+            out_val = op.outputs[0]
+            
+            # Check if single use (within this pass)
+            # Count users that are in current pass
+            users_in_pass = [u for u in out_val.users if id(u) in pass_op_ids]
+            
+            if len(users_in_pass) != 1:
+                continue
+            
+            # Check if opcode is inlinable
+            if op.opcode not in self.INLINABLE_OPCODES:
+                continue
+            
+            # Don't inline if has side effects
+            if op.side_effects:
+                continue
+            
+            # Mark for inlining
+            self._inlined_ops.add(id(op))
 
     def _generate_selective_header(self) -> str:
         """Generate minimal GLSL header with only needed functions."""
@@ -122,7 +175,9 @@ class ShaderGenerator:
         for op in compute_pass.ops:
             # Track required GLSL for tree-shaking
             self._track_glsl_requirements(op)
-            lines.append(self._emit_op(op))
+            emitted = self._emit_op(op)
+            if emitted:  # Filter empty lines from inlined ops
+                lines.append(emitted)
         lines.append("}")
         return "\n".join(lines)
 
@@ -134,7 +189,10 @@ class ShaderGenerator:
             self._required_bundles.update(bundles)
 
     def _param(self, val: Value) -> str:
-        """Resolves a value to its GLSL string representation."""
+        """Resolves a value to its GLSL string representation.
+        
+        For inlined ops, generates the expression inline instead of v{id} reference.
+        """
         # Track emitted IDs for current pass
         if not hasattr(self, '_emitted_ids'):
             self._emitted_ids = set()
@@ -144,6 +202,11 @@ class ShaderGenerator:
                 # Use sequential binding slot from mapping
                 slot = self._binding_map.get(val.resource_index, val.resource_index)
                 return f"img_{slot}"
+            
+            # Check if this value comes from an inlined op
+            if val.origin and id(val.origin) in self._inlined_ops:
+                return self._generate_inline_expr(val.origin)
+            
             return f"v{val.id}"
         elif val.kind == ValueKind.CONSTANT:
             if val.id in self._emitted_ids:
@@ -159,6 +222,52 @@ class ShaderGenerator:
         elif val.kind == ValueKind.BUILTIN:
             return val.name_hint
         return "UNKNOWN"
+    
+    def _generate_inline_expr(self, op: Op) -> str:
+        """Generate an inline GLSL expression for a simple op."""
+        opcode = op.opcode
+        
+        if opcode == OpCode.CONSTANT:
+            if op.outputs:
+                return self._format_constant(op.attrs.get('value'), op.outputs[0].type)
+            return "0.0"
+        
+        if opcode == OpCode.CAST:
+            target_type = op.attrs.get('type', 'float').lower()
+            inner = self._param(op.inputs[0])
+            return f"{target_type}({inner})"
+        
+        if opcode == OpCode.SWIZZLE:
+            mask = op.attrs.get('mask', 'x')
+            inner = self._param(op.inputs[0])
+            return f"{inner}.{mask}"
+        
+        if opcode == OpCode.CONSTRUCT:
+            args = ', '.join(self._param(inp) for inp in op.inputs)
+            out_type = self._type_str(op.outputs[0].type) if op.outputs else 'vec4'
+            return f"{out_type}({args})"
+        
+        if opcode == OpCode.BUILTIN:
+            # BUILTIN ops just reference the intrinsic name
+            name = op.attrs.get('name', 'gl_GlobalInvocationID')
+            return name
+        
+        if opcode == OpCode.COMBINE_XYZ:
+            # vec3 constructor
+            args = ', '.join(self._param(inp) for inp in op.inputs)
+            return f"vec3({args})"
+        
+        # Binary ops
+        if opcode in {OpCode.ADD, OpCode.SUB, OpCode.MUL, OpCode.DIV}:
+            op_map = {OpCode.ADD: '+', OpCode.SUB: '-', OpCode.MUL: '*', OpCode.DIV: '/'}
+            a = self._param(op.inputs[0])
+            b = self._param(op.inputs[1])
+            return f"({a} {op_map[opcode]} {b})"
+        
+        # Fallback: can't inline, use variable reference
+        if op.outputs:
+            return f"v{op.outputs[0].id}"
+        return "0.0"
     
     def _format_constant(self, value: Any, dtype: DataType) -> str:
         """Format a Python value as GLSL literal."""
@@ -187,6 +296,10 @@ class ShaderGenerator:
         if op_id in self._emitted_op_ids:
             return ""  # Skip duplicate
         self._emitted_op_ids.add(op_id)
+        
+        # Skip inlined ops - they will be generated inline via _param()
+        if op_id in self._inlined_ops:
+            return ""
         
         # Ops that handle their own output declarations
         self_declaring_ops = {OpCode.IMAGE_STORE, OpCode.SEPARATE_XYZ, OpCode.SEPARATE_COLOR}

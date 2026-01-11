@@ -421,11 +421,6 @@ class ResourceResolver:
         """Get dict of pending resources."""
         return self._pending_resources.copy()
     
-    def update_grid_size(self, idx: int, width: int, height: int, depth: int = 1):
-        """Update tracked grid size (called by loop executor)."""
-        # This is now handled via ExecutionState
-        pass
-    
     def evaluate_dynamic_size(self, res_desc, iteration: int, 
                                context_width: int, context_height: int,
                                texture_map: dict = None,

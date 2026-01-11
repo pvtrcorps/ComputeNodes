@@ -54,11 +54,14 @@ def extract_graph(nodetree) -> Graph:
         logger.warning("No Output Node found (Output Image or Output Sequence)")
         return graph
 
-    def get_socket_key(socket):
-        """Get unique key for a socket."""
+    def get_socket_key(socket, scope=()):
+        """Get unique key for a socket, including scope for NodeGroup differentiation."""
         if hasattr(socket, "as_pointer"):
-            return socket.as_pointer()
-        return id(socket)
+            ptr = socket.as_pointer()
+        else:
+            ptr = id(socket)
+        # Include scope tuple for unique keys across NodeGroup instances
+        return (ptr, tuple(scope))
 
     def get_node_key(node):
         """Get unique key for a node."""
@@ -66,7 +69,7 @@ def extract_graph(nodetree) -> Graph:
             return node.as_pointer()
         return id(node)
 
-    def get_socket_value(socket) -> Value:
+    def get_socket_value(socket, scope=()) -> Value:
         """Recursively get or compute the value for a socket.
         
         Auto-Sample Feature:
@@ -74,7 +77,7 @@ def extract_graph(nodetree) -> Graph:
         (FLOAT, VEC3, VEC4, RGBA), automatically inject a sample operation
         using normalized UV coordinates.
         """
-        key = get_socket_key(socket)
+        key = get_socket_key(socket, scope)
         if hasattr(socket, 'name'):
              pass # print(f"DEBUG_CORE: get_socket_value {socket.name} (Node: {socket.node.name if hasattr(socket, 'node') and socket.node else 'None'}). Linked: {socket.is_linked}")
 
@@ -95,14 +98,14 @@ def extract_graph(nodetree) -> Graph:
             # Optimization/Cycle Breaking: Check if source socket is already computed
             # This allows reading outputs from a node that is currently on the recursion stack
             # (e.g. Repeat Input providing values for the loop body)
-            from_key = get_socket_key(from_socket)
+            from_key = get_socket_key(from_socket, scope)
             if from_key in socket_value_map:
                 val = socket_value_map[from_key]
                 socket_value_map[key] = val
                 return val
             
-            # Recursive call to process dependency
-            val = process_node(from_node, from_socket)
+            # Recursive call to process dependency (pass scope)
+            val = process_node(from_node, from_socket, scope)
             
             # === AUTO-SAMPLE: Grid → Field conversion ===
             # If we got a HANDLE (Grid) but the socket expects a field type,
@@ -151,7 +154,7 @@ def extract_graph(nodetree) -> Graph:
 
     from .node_context import NodeContext
     
-    def process_node(node, out_socket=None) -> Value:
+    def process_node(node, out_socket=None, scope=()) -> Value:
         """
         Process a single node and return the value for the requested output socket.
         """
@@ -176,15 +179,23 @@ def extract_graph(nodetree) -> Graph:
             
             # Create typed context - include extraction_state reference for loop_depth tracking
             # Pass as 'extraction_state' key so the dict can be modified by handlers
+            # Create scope-aware wrappers for this context
+            def scoped_get_socket_key(socket):
+                return get_socket_key(socket, scope)
+            
+            def scoped_get_socket_value(socket):
+                return get_socket_value(socket, scope)
+            
             ctx = NodeContext(
                 builder=builder,
                 node=node,
                 socket_value_map=socket_value_map,
-                get_socket_key=get_socket_key,
-                get_socket_value=get_socket_value,
+                get_socket_key=scoped_get_socket_key,
+                get_socket_value=scoped_get_socket_value,
                 extra_ctx={
                     'output_socket_needed': out_socket,
-                    'extraction_state': extraction_state
+                    'extraction_state': extraction_state,
+                    'scope_path': list(scope),  # Current scope as mutable list
                 }
             )
             

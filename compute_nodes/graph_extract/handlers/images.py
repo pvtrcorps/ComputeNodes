@@ -74,6 +74,11 @@ def handle_sample(node, ctx):
     val_img = ctx.get_input(0)  # Texture
     val_coord = ctx.get_input(1)  # Coordinate
     
+    # DEBUG LOG
+    print(f"DEBUG_SAMPLE: Extracting Sample Node '{node.name}'")
+    print(f"  Grid Input: {val_img} (Resource: {val_img.resource_index if val_img else 'None'})")
+    print(f"  Coord Input: {val_coord}")
+    
     if val_img is None:
         val_out = builder.constant((0.0, 0.0, 0.0, 0.0), DataType.VEC4)
     else:

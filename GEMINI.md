@@ -243,6 +243,29 @@ The runtime execution layer is organized into specialized components:
 | `runtime/loop_executor.py` | Loop/ping-pong handling |
 | `runtime/textures.py` | DynamicTexturePool |
 
+### 5.5 Loop Scope Filtering (Critical Optimization)
+
+When executing nested loops, each loop ONLY evaluates resources that it directly writes:
+
+```
+┌─ Outer Loop (e.g., 5 iterations) ──────────────────────────┐
+│  Evaluates: Resources written by Outer's direct passes     │
+│                                                            │
+│  ┌─ Inner Loop (e.g., 100 iterations) ──────────────────┐  │
+│  │  Evaluates: Resources written by Inner's direct passes│  │
+│  │  Does NOT re-evaluate Outer's resources (performance) │  │
+│  │  Uses correct Iteration index (correctness)           │  │
+│  └───────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Why this matters:**
+- Without filtering: Inner loop (100 iters) evaluates ALL resources = 100× overhead
+- With filtering: Inner loop only evaluates its own resources = O(1) overhead
+- Correctness: Inner loop uses `Iteration` of inner scope, not outer
+
+**Implementation:** `LoopExecutor._filter_resources_for_loop()` inspects `writes_idx` of direct `ComputePass` children only.
+
 ## 6. Resolution Model
 
 | Node | Defines Resolution? |
