@@ -88,7 +88,8 @@ def handle_output_image(node, ctx):
         dimensions=2,
         is_internal=False,
         dynamic_size=is_dynamic,
-        size_expression={'source_resource': res_idx} if is_dynamic else {}
+        size_expression={'source_resource': res_idx} if is_dynamic else {},
+        trigger_update=getattr(node, 'trigger_update', False)
     )
     val_target = builder.add_resource(desc)
     

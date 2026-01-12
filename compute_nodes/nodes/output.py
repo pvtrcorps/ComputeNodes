@@ -59,6 +59,12 @@ class ComputeNodeOutputImage(ComputeNode):
         default='DATABLOCK'
     )
     
+    trigger_update: BoolProperty(
+        name="Trigger Update",
+        description="Force dependency graph update after writing (required for Geometry Nodes)",
+        default=False
+    )
+    
     # File output options (shown when save_mode == 'SAVE')
     filepath: StringProperty(
         name="File Path",
@@ -84,6 +90,10 @@ class ComputeNodeOutputImage(ComputeNode):
         
         # Save mode
         layout.prop(self, "save_mode", text="")
+        
+        # Trigger update option
+        if self.save_mode == 'DATABLOCK':
+            layout.prop(self, "trigger_update")
         
         # Show file options when saving
         if self.save_mode == 'SAVE':

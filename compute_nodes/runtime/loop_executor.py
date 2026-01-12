@@ -187,17 +187,19 @@ class LoopExecutor:
                 
                 fmt = 'RGBA32F'
             
-            # Create FRESH ping buffer (never shared with initial texture)
+            # Create FRESH ping buffer
             ping_tex = gpu.types.GPUTexture(
                 size=(width, height),
                 format=fmt
             )
+            ping_tex.filter_mode(True)
             
             # Create FRESH pong buffer
             pong_tex = gpu.types.GPUTexture(
                 size=(width, height),
                 format=fmt
             )
+            pong_tex.filter_mode(True)
             
             # CRITICAL: Copy initial data into ping buffer
             if init_tex is not None:

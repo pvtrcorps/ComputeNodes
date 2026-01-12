@@ -71,8 +71,15 @@ def _generate_shader_for_item(item, generator):
         item.source = generator.generate(item)
         item.display_source = item.source
 
+_is_executing = False
+
 def execute_compute_tree(tree, context):
     """Core execution logic for a Compute Node Tree"""
+    global _is_executing
+    if _is_executing:
+        return 0
+        
+    _is_executing = True
     try:
         # Setup Logging
         from .logger import setup_logger, log_info
@@ -136,6 +143,8 @@ def execute_compute_tree(tree, context):
         import traceback
         traceback.print_exc()
         raise e
+    finally:
+        _is_executing = False
 
 class ComputeExecuteOperator(bpy.types.Operator):
     """Execute the current Compute Node Tree on GPU"""

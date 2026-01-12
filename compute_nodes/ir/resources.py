@@ -53,6 +53,7 @@ class ImageDesc(ResourceDesc):
     dynamic_size: bool = False  # True if size computed at runtime
     size_expression: dict = field(default_factory=dict, compare=False, hash=False)  # Runtime size computation
     loop_body_resource: bool = False  # True if this resource is written INSIDE a loop body
+    trigger_update: bool = False  # Force dependency graph update
     
     def __post_init__(self):
         # Set appropriate resource type based on dimensions

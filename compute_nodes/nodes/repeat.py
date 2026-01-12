@@ -78,6 +78,10 @@ def update_repeat_item_name(self, context):
     # Find the node that owns this item
     # Since we can't easily get the owner from PropertyGroup, we assume
     # the active node is the one being edited (or its pair)
+    # Note: In some contexts (e.g. script execution), active_node might not be available.
+    if not hasattr(context, "active_node"):
+        return
+
     node = context.active_node
     if not node:
         return

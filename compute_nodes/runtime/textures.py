@@ -100,6 +100,8 @@ class TextureManager:
             else:
                 texture = gpu.types.GPUTexture(size, format=fmt)
             
+            # Explicitly set linear filtering for simulation accuracy
+            texture.filter_mode(True)
             self._internal_textures[name] = texture
             logger.debug(f"Created {dims}D texture '{name}': {size}, format={fmt}")
             return texture

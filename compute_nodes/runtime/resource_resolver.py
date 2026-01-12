@@ -405,6 +405,22 @@ class ResourceResolver:
                 image.scale(tex.width, tex.height)
             
             self.texture_mgr.readback_to_image(tex, image)
+            
+            # Explicit update trigger for dependency graph (Geometry Nodes)
+            if getattr(res_desc, 'trigger_update', False):
+                # image.update() is already called in readback_to_image
+                pass
+                # Clean update strategy: Tag specific objects using Geometry Nodes
+                # This avoids frame jumping while ensuring modifiers re-evaluate.
+                if bpy.context.view_layer:
+                    for obj in bpy.context.view_layer.objects:
+                        if obj.type in {'MESH', 'CURVE', 'POINTCLOUD', 'VOLUME'}:
+                            for mod in obj.modifiers:
+                                if mod.type == 'NODES':
+                                    obj.update_tag(refresh={'DATA'})
+                                    break
+                    
+                    bpy.context.view_layer.update()
     
     def get_dynamic_resources(self):
         """Get dict of all dynamic resources (for loop executor to evaluate sizes)."""
